@@ -265,6 +265,8 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         fun onMoveStart()
         fun onMove(dyPx: Float)
         fun onMoveEnd()
+        /** ← → を上下にはじいたとき: 1行上/下へ */
+        fun onLineMove(up: Boolean)
     }
 
     private var moveDragListener: MoveDragListener? = null
@@ -287,13 +289,46 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
             rawY >= loc[1] && rawY < loc[1] + view.height
     }
 
-    private fun cancelTouchForGesture() {
+    private fun cancelTouchForGesture(
+        haptic: Int = android.view.HapticFeedbackConstants.LONG_PRESS,
+    ) {
         val now = android.os.SystemClock.uptimeMillis()
         val cancel = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0f, 0f, 0)
         super.dispatchTouchEvent(cancel)
         cancel.recycle()
         cancelActiveTouch(KeyTouchCancelReason.ActionCancel)
-        performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        performHapticFeedback(haptic)
+    }
+
+    // ---- ← → の上下フリックで行移動。押し続けると徐々に速くなる（上限あり） ----
+    private var lineMoveCandidate = false
+    private var lineMoving = false
+    private var lineMoveUp = false
+    private var lineMoveIntervalMs = LINE_MOVE_FIRST_REPEAT_MS
+    private val lineMoveRepeatRunnable = object : Runnable {
+        override fun run() {
+            if (!lineMoving) return
+            moveDragListener?.onLineMove(lineMoveUp)
+            lineMoveIntervalMs = (lineMoveIntervalMs * 0.85f).toLong().coerceAtLeast(LINE_MOVE_MIN_MS)
+            postDelayed(this, lineMoveIntervalMs)
+        }
+    }
+
+    private fun startLineMove(up: Boolean) {
+        lineMoving = true
+        lineMoveUp = up
+        cancelTouchForGesture(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+        moveDragListener?.onLineMove(up)
+        lineMoveIntervalMs = LINE_MOVE_FIRST_REPEAT_MS
+        removeCallbacks(lineMoveRepeatRunnable)
+        // 少し押し続けたら連続移動を始める
+        postDelayed(lineMoveRepeatRunnable, LINE_MOVE_HOLD_MS)
+    }
+
+    private fun stopLineMove() {
+        lineMoving = false
+        lineMoveCandidate = false
+        removeCallbacks(lineMoveRepeatRunnable)
     }
 
     fun setMoveDragListener(listener: MoveDragListener?) {
@@ -323,6 +358,9 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         if (!clearGridApplied || moveDragListener == null) return super.dispatchTouchEvent(ev)
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                stopLineMove()
+                lineMoveCandidate = isOnView(binding.keySoftLeft, ev.rawX, ev.rawY) ||
+                    isOnView(binding.keyMoveCursorRight, ev.rawX, ev.rawY)
                 moveDragging = false
                 moveGestureIsDrag = false
                 moveDownRawX = ev.rawX
@@ -343,6 +381,24 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
             }
 
             MotionEvent.ACTION_MOVE -> {
+                if (lineMoving) {
+                    // 指を反対側へ動かしたら向きを変える
+                    val dy = ev.rawY - moveDownRawY
+                    if (kotlin.math.abs(dy) > flickThresholdPx && (dy < 0) != lineMoveUp) {
+                        lineMoveUp = dy < 0
+                    }
+                    return true
+                }
+                if (lineMoveCandidate && !moveDragging) {
+                    val dx = ev.rawX - moveDownRawX
+                    val dy = ev.rawY - moveDownRawY
+                    if (kotlin.math.abs(dy) > flickThresholdPx && kotlin.math.abs(dy) > kotlin.math.abs(dx)) {
+                        removeCallbacks(moveStartRunnable)
+                        removeCallbacks(toggleFloatingRunnable)
+                        startLineMove(up = dy < 0)
+                        return true
+                    }
+                }
                 if (moveDragging) {
                     if (moveGestureIsDrag) {
                         moveDragListener?.onMove(ev.rawY - moveLastRawY)
@@ -360,7 +416,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
             }
 
             MotionEvent.ACTION_POINTER_DOWN -> {
-                if (moveDragging) return true
+                if (moveDragging || lineMoving) return true
                 removeCallbacks(moveStartRunnable)
                 removeCallbacks(toggleFloatingRunnable)
             }
@@ -368,6 +424,11 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 removeCallbacks(moveStartRunnable)
                 removeCallbacks(toggleFloatingRunnable)
+                if (lineMoving) {
+                    stopLineMove()
+                    return true
+                }
+                lineMoveCandidate = false
                 if (moveDragging) {
                     moveDragging = false
                     if (moveGestureIsDrag) moveDragListener?.onMoveEnd()
@@ -376,9 +437,18 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
                 }
             }
 
-            else -> if (moveDragging) return true
+            else -> if (moveDragging || lineMoving) return true
         }
         return super.dispatchTouchEvent(ev)
+    }
+
+    private companion object LineMoveTiming {
+        /** 1行目のあと、連続移動を始めるまで */
+        const val LINE_MOVE_HOLD_MS = 350L
+        /** 連続移動の最初の間隔 */
+        const val LINE_MOVE_FIRST_REPEAT_MS = 220L
+        /** 最速でも1行ずつ目で追える程度（約12行/秒） */
+        const val LINE_MOVE_MIN_MS = 80L
     }
 
     private fun clearGridKeys(): List<View> = binding.run {

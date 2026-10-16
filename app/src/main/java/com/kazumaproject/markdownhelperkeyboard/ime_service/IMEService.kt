@@ -1777,6 +1777,14 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         prefs.edit().putBoolean("clear_keyboard_size_reset_v1", true).apply()
     }
 
+    /** ← → の上下フリック: 1行上/下へカーソルを動かす。変換中は何もしない。 */
+    private fun moveCursorOneLine(up: Boolean) {
+        if (inputString.value.isNotEmpty() || isHenkan.get()) return
+        sendDownUpKeyEvents(
+            if (up) android.view.KeyEvent.KEYCODE_DPAD_UP else android.view.KeyEvent.KEYCODE_DPAD_DOWN
+        )
+    }
+
     private fun isClearKeyboardAllowed(): Boolean {
         return isInputViewActive &&
             !isFullscreenMode &&
@@ -11518,6 +11526,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                 override fun onMoveStart() {}
                 override fun onMove(dyPx: Float) = clearKeyboard.moveBy(dyPx)
                 override fun onMoveEnd() = clearKeyboard.saveLift()
+                override fun onLineMove(up: Boolean) = moveCursorOneLine(up)
             })
             applyKeyboardTheme(
                 skinId = keyboardSkinId,
