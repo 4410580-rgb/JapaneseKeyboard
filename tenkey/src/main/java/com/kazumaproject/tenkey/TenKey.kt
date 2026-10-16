@@ -359,6 +359,11 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         moveLastRawY = moveDownRawY
         // キー入力としてはキャンセル扱いにする
         cancelTouchForGesture()
+        // 掴んだときだけ「ブルッ」と知らせる（キーの振動とは別。設定に関係なく鳴らす）
+        performHapticFeedback(
+            android.view.HapticFeedbackConstants.LONG_PRESS,
+            android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING,
+        )
         moveDragListener?.onMoveStart()
     }
 

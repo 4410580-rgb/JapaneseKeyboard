@@ -1736,9 +1736,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
     // 透過キーボード（日本語テンキーを格子だけで描き、アプリを縮めない）
     private val clearKeyboard = ClearKeyboardController(
         isAllowed = { isClearKeyboardAllowed() },
-        hasCandidates = {
-            inputString.value.isNotEmpty() || suggestionAdapter?.suggestions?.isNotEmpty() == true
-        },
+        hasCandidates = { clearStripHasCandidates() },
         onActiveChanged = { active, mainView -> onClearKeyboardActiveChanged(active, mainView) },
     )
 
@@ -1794,13 +1792,40 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
 
     /** ← を右に / → を左にはじいたとき: タップと同じ1文字移動を反対向きに。変換中は何もしない。 */
     private fun moveCursorOneChar(right: Boolean) {
-        if (isHenkan.get()) return
+        val mainView = mainLayoutBinding
         val insertString = inputString.value
+        if (mainView != null && moveClearCandidate(
+                right, mainView, suggestionAdapter?.suggestions.orEmpty(), insertString
+            )
+        ) return
+        if (isHenkan.get()) return
         if (right) {
             actionInRightKeyPressed(GestureType.Tap, insertString)
         } else {
             handleLeftCursor(GestureType.Tap, insertString)
         }
+    }
+
+    private fun clearStripHasCandidates(): Boolean =
+        inputString.value.isNotEmpty() || suggestionAdapter?.suggestions?.isNotEmpty() == true
+
+    /**
+     * 透過キーボード: 入力中は ← → で候補の選択を左右に動かす。動かしたら true。
+     * まだ選んでいなければ → でも ← でも先頭の候補から始める。
+     */
+    private fun moveClearCandidate(
+        right: Boolean,
+        mainView: MainLayoutBinding,
+        suggestions: List<Candidate>,
+        insertString: String,
+    ): Boolean {
+        if (!clearKeyboard.isActive() || insertString.isEmpty() || suggestions.isEmpty()) return false
+        if (!isHenkan.get() || right) {
+            handleJapaneseModeSpaceKey(mainView, suggestions, insertString)
+        } else {
+            handleDeleteKeyInHenkan(suggestions, insertString)
+        }
+        return true
     }
 
     private fun isClearKeyboardAllowed(): Boolean {
@@ -11919,6 +11944,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
             Key.SideKeyCursorLeft -> {
                 if (!leftCursorKeyLongKeyPressed.get()) {
                     if (moveFocusedBunsetsuSegment(delta = -1)) {
+                    } else if (moveClearCandidate(right = false, mainView, suggestions, insertString)) {
                     } else if (isHenkan.get()) {
                         handleDeleteKeyInHenkan(suggestions, insertString)
                     } else {
@@ -11931,6 +11957,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
             Key.SideKeyCursorRight -> {
                 if (!rightCursorKeyLongKeyPressed.get()) {
                     if (moveFocusedBunsetsuSegment(delta = 1)) {
+                    } else if (moveClearCandidate(right = true, mainView, suggestions, insertString)) {
                     } else if (isHenkan.get()) {
                         handleJapaneseModeSpaceKey(
                             mainView, suggestions, insertString
@@ -12008,6 +12035,13 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                             } else {
                                 handleSpaceKeyClick(true, insertString, suggestions, mainView)
                             }
+                        } else if (clearKeyboard.isActive() &&
+                            (insertString.isNotEmpty() || isHenkan.get())
+                        ) {
+                            // 透過キーボード: 空白キーは変換しない。入力中の文字を確定してから空白
+                            handleNonEmptyInputEnterKey(suggestions, mainView, insertString)
+                            val isHankaku = hankakuPreference == true
+                            handleSpaceKeyClick(isHankaku, "", emptyList(), mainView)
                         } else {
                             val isHankaku = hankakuPreference == true
                             handleSpaceKeyClick(isHankaku, insertString, suggestions, mainView)
@@ -12019,6 +12053,11 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
 
             Key.SideKeySymbol -> {
                 vibrate()
+                // 透過キーボード: 候補が出ている間、左上のマスは候補一覧を開く矢印
+                if (clearKeyboard.isActive() && clearStripHasCandidates()) {
+                    _suggestionViewStatus.update { !it }
+                    return
+                }
                 _keyboardSymbolViewState.value = SymbolKeyboardState(
                     isShown = !_keyboardSymbolViewState.value.isShown
                 )
@@ -12213,6 +12252,11 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
 
             Key.SideKeySymbol -> {
                 vibrate()
+                // 透過キーボード: 候補が出ている間、左上のマスは候補一覧を開く矢印
+                if (clearKeyboard.isActive() && clearStripHasCandidates()) {
+                    _suggestionViewStatus.update { !it }
+                    return
+                }
                 _keyboardSymbolViewState.value = SymbolKeyboardState(
                     isShown = !_keyboardSymbolViewState.value.isShown
                 )
@@ -28266,6 +28310,19 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
             return
         }
         when {
+            insertString.isNotEmpty() && isHenkan.get() && clearKeyboard.isActive() &&
+                !isBunsetsuCursorMoveSessionActive() -> {
+                // 透過キーボード: 候補を選んでいる途中でも ⌫ で1文字消す
+                cancelHenkanByLongPressDeleteKey()
+                deleteKeyLongKeyPressed.set(false)
+                hasConvertedKatakana = isLiveConversionEnable == true
+                val reading = inputString.value
+                if (reading.isNotEmpty()) {
+                    deleteStringCommon(reading)
+                    resetFlagsDeleteKey()
+                }
+            }
+
             insertString.isNotEmpty() -> {
                 if (isHenkan.get()) {
                     if (isBunsetsuCursorMoveSessionActive()) {

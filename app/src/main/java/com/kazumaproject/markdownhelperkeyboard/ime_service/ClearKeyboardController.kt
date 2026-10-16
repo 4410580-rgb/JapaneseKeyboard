@@ -201,7 +201,10 @@ class ClearKeyboardController(
         val active = isActive()
         if (active != lastActive) {
             lastActive = active
-            if (!active) chrome.restore(view.root, view.suggestionViewParent, view.candidateTabLayout)
+            if (!active) {
+                chrome.restore(view.root, view.suggestionViewParent, view.candidateTabLayout)
+                view.suggestionViewParent.translationY = 0f
+            }
             onActiveChanged(active, view)
             // insets を取り直してもらう
             container?.post { container?.requestLayout() }
@@ -216,12 +219,32 @@ class ClearKeyboardController(
             chrome.enforce(
                 transparent = listOf(view.root),
                 scrim = listOf(view.suggestionViewParent, view.candidateTabLayout),
-                hidden = listOf(view.keyboardBackgroundContainer, view.shortcutToolbarRecyclerview),
+                hidden = listOf(
+                    view.keyboardBackgroundContainer,
+                    view.shortcutToolbarRecyclerview,
+                    // 候補一覧を開く矢印は左上のマスが代わりをするので出さない（候補の幅を優先）
+                    view.suggestionVisibility,
+                ),
             )
+            overlayStripOnTopRow(view)
         }
-        // 浮かせていて候補が無いときは候補の段ごと見えなくする（触れる範囲からも外している）
-        val stripAlpha = if (floating && !hasCandidates()) 0f else 1f
+        // 候補が無いときは候補の段ごと見えなくする（浮かせているときは触れる範囲からも外している）
+        val stripAlpha = if ((active || floating) && !hasCandidates()) 0f else 1f
         if (view.suggestionViewParent.alpha != stripAlpha) view.suggestionViewParent.alpha = stripAlpha
+    }
+
+    /**
+     * 候補の段をテンキーの一番上の段に重ねる。キーが上にあるので触ってもキー入力になり、
+     * 候補は ← → で選ぶ。上に空いた分はアプリ側に返る（insets は中身の上端で決める）。
+     */
+    private fun overlayStripOnTopRow(view: MainLayoutBinding) {
+        val strip = view.suggestionViewParent
+        val keys = view.keyboardView
+        if (keys.height == 0 || strip.height == 0) return
+        val rowHeight = keys.height / 4f
+        val targetTop = keys.top + ((rowHeight - strip.height) / 2f).coerceAtLeast(0f)
+        val dy = targetTop - strip.top
+        if (kotlin.math.abs(strip.translationY - dy) > 0.5f) strip.translationY = dy
     }
 }
 
@@ -285,6 +308,6 @@ private class ClearChrome {
     }
 
     companion object {
-        private const val SCRIM_ALPHA = 255 // 候補の段は不透明
+        private const val SCRIM_ALPHA = 190 // 候補の段は格子に重ねて少し透かす
     }
 }
