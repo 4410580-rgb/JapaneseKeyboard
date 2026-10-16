@@ -72,6 +72,8 @@ class ClearKeyboardController(
             .putFloat(PREF_LIFT, liftPx)
             .apply()
         applyLift(isActive())
+        // insets（アプリを押し上げるかどうか）を取り直してもらう
+        c.post { c.requestLayout() }
     }
 
     fun saveLift() {
@@ -118,6 +120,10 @@ class ClearKeyboardController(
     /** onComputeInsets から呼ぶ。透過中なら true を返し、アプリを縮めない insets を入れる。 */
     fun computeInsets(outInsets: Insets, windowHeight: Int): Boolean {
         if (!isActive()) return false
+        // 画面下に固定しているときは普通のキーボードと同じくアプリを押し上げる。
+        // 浮かせているときだけ、アプリを縮めずに裏を見せる。
+        val c = container ?: return false
+        if (!isFloatingOn(c.context)) return false
         val root = mainView?.root ?: return false
         if (windowHeight <= 0 || root.height == 0) return false
         val loc = IntArray(2)

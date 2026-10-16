@@ -444,7 +444,6 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         val line = resources.displayMetrics.density.coerceAtLeast(1f)
         val half = line / 2f
         val views = scalableKeyViews().filter { it.visibility == View.VISIBLE }
-        val edgeSlop = 2f * resources.displayMetrics.density
         views.forEach { v ->
             if (v.alpha != 0f) v.alpha = 0f
             val lp = v.layoutParams as? LayoutParams
@@ -458,13 +457,31 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
                 v.isPressed
             }
             if (pressed) canvas.drawRect(left, top, right, bottom, clearPressedPaint)
-            // 右端・下端以外の境目にだけ線を引く（外枠は描かない）
-            if (right < width - edgeSlop) {
-                canvas.drawRect(right - half, top, right + half, bottom, clearGridPaint)
-            }
-            if (bottom < height - edgeSlop) {
-                canvas.drawRect(left, bottom - half, right, bottom + half, clearGridPaint)
-            }
+        }
+        drawCenterGrid(canvas, half)
+    }
+
+    /** 中央 3 列だけの格子: 縦線 2 本（4 段ぶん）と横線 3 本（3 列ぶん）。 */
+    private fun drawCenterGrid(canvas: android.graphics.Canvas, half: Float) {
+        binding.apply {
+            fun cellLeft(v: View) = v.left - ((v.layoutParams as? LayoutParams)?.marginStart ?: 0).toFloat()
+            fun cellRight(v: View) = v.right + ((v.layoutParams as? LayoutParams)?.marginEnd ?: 0).toFloat()
+            fun cellTop(v: View) = v.top - ((v.layoutParams as? LayoutParams)?.topMargin ?: 0).toFloat()
+            fun cellBottom(v: View) = v.bottom + ((v.layoutParams as? LayoutParams)?.bottomMargin ?: 0).toFloat()
+
+            val top = cellTop(key1)
+            val bottom = cellBottom(key11)
+            val left = cellLeft(key1)
+            val right = cellRight(key3)
+            // 縦線: あ|か、か|さ の境目
+            listOf((cellRight(key1) + cellLeft(key2)) / 2f, (cellRight(key2) + cellLeft(key3)) / 2f)
+                .forEach { x -> canvas.drawRect(x - half, top, x + half, bottom, clearGridPaint) }
+            // 横線: 1|2段、2|3段、3|4段 の境目
+            listOf(
+                (cellBottom(key1) + cellTop(key4)) / 2f,
+                (cellBottom(key4) + cellTop(key7)) / 2f,
+                (cellBottom(key7) + cellTop(key11)) / 2f,
+            ).forEach { y -> canvas.drawRect(left, y - half, right, y + half, clearGridPaint) }
         }
     }
 
