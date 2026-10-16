@@ -1723,6 +1723,23 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         onActiveChanged = { active, mainView -> onClearKeyboardActiveChanged(active, mainView) },
     )
 
+    /**
+     * 以前のフローティング窓の操作で、標準キーボードの幅・高さ・位置まで変わってしまっていた。
+     * 一度だけ既定値に戻す（透過キーボードの浮かせ方は別に持つ）。
+     */
+    private fun resetKeyboardSizeOnceForClearKeyboard() {
+        val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this)
+        if (prefs.getBoolean("clear_keyboard_size_reset_v1", false)) return
+        appPreference.keyboard_height = 220
+        appPreference.keyboard_width = 100
+        appPreference.keyboard_position = true
+        appPreference.keyboard_vertical_margin_bottom = 0
+        appPreference.keyboard_margin_start_dp = 0
+        appPreference.keyboard_margin_end_dp = 0
+        appPreference.is_floating_mode = false
+        prefs.edit().putBoolean("clear_keyboard_size_reset_v1", true).apply()
+    }
+
     private fun isClearKeyboardAllowed(): Boolean {
         return isInputViewActive &&
             !isFullscreenMode &&
@@ -3095,6 +3112,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
 
     override fun onCreate() {
         super.onCreate()
+        resetKeyboardSizeOnceForClearKeyboard()
         localFontScope.launch {
             runCatching { localFontRepository.loadIfNeeded() }
                 .onFailure { Timber.w(it, "Unable to restore the saved local keyboard font") }
@@ -11457,6 +11475,8 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
             setOnFlickTextPreviewListener(tenKeyFlickTextPreviewListener)
             setClearGridRequested(true)
             setMoveDragListener(object : com.kazumaproject.tenkey.TenKey.MoveDragListener {
+                override fun canMove(): Boolean = clearKeyboard.canMove()
+                override fun onToggleFloating() = clearKeyboard.toggleFloating()
                 override fun onMoveStart() {}
                 override fun onMove(dyPx: Float) = clearKeyboard.moveBy(dyPx)
                 override fun onMoveEnd() = clearKeyboard.saveLift()

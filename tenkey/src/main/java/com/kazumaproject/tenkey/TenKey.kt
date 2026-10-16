@@ -258,6 +258,10 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
 
     // ---- 透過モード: 長押しでキーボードを上下に動かす（⌫ だけは連続削除を優先） ----
     interface MoveDragListener {
+        /** フローティング中だけ長押しで掴める */
+        fun canMove(): Boolean
+        /** 左上（記号）の長押しでフローティングの入/切 */
+        fun onToggleFloating()
         fun onMoveStart()
         fun onMove(dyPx: Float)
         fun onMoveEnd()
@@ -269,6 +273,28 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
     private var moveDownRawY = 0f
     private var moveLastRawY = 0f
     private val moveStartRunnable = Runnable { startMoveDrag() }
+    private val toggleFloatingRunnable = Runnable {
+        if (!clearGridApplied) return@Runnable
+        cancelTouchForGesture()
+        moveDragging = true // 指を離すまで残りのイベントは捨てる
+        moveDragListener?.onToggleFloating()
+    }
+
+    private fun isOnView(view: View, rawX: Float, rawY: Float): Boolean {
+        val loc = IntArray(2)
+        view.getLocationOnScreen(loc)
+        return rawX >= loc[0] && rawX < loc[0] + view.width &&
+            rawY >= loc[1] && rawY < loc[1] + view.height
+    }
+
+    private fun cancelTouchForGesture() {
+        val now = android.os.SystemClock.uptimeMillis()
+        val cancel = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0f, 0f, 0)
+        super.dispatchTouchEvent(cancel)
+        cancel.recycle()
+        cancelActiveTouch(KeyTouchCancelReason.ActionCancel)
+        performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+    }
 
     fun setMoveDragListener(listener: MoveDragListener?) {
         moveDragListener = listener
@@ -281,17 +307,15 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
             rawY >= loc[1] && rawY < loc[1] + binding.keyDelete.height
     }
 
+    private var moveGestureIsDrag = false
+
     private fun startMoveDrag() {
-        if (!clearGridApplied || moveDragListener == null) return
+        if (!clearGridApplied || moveDragListener?.canMove() != true) return
         moveDragging = true
+        moveGestureIsDrag = true
         moveLastRawY = moveDownRawY
         // キー入力としてはキャンセル扱いにする
-        val now = android.os.SystemClock.uptimeMillis()
-        val cancel = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0f, 0f, 0)
-        super.dispatchTouchEvent(cancel)
-        cancel.recycle()
-        cancelActiveTouch(KeyTouchCancelReason.ActionCancel)
-        performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        cancelTouchForGesture()
         moveDragListener?.onMoveStart()
     }
 
@@ -300,18 +324,25 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 moveDragging = false
+                moveGestureIsDrag = false
                 moveDownRawX = ev.rawX
                 moveDownRawY = ev.rawY
                 removeCallbacks(moveStartRunnable)
-                if (!isOnDeleteKey(ev.rawX, ev.rawY)) {
-                    postDelayed(moveStartRunnable, (longPressTimeout * 8 / 10).coerceAtLeast(250L))
+                removeCallbacks(toggleFloatingRunnable)
+                val delay = (longPressTimeout * 8 / 10).coerceAtLeast(250L)
+                if (isOnView(binding.keyReturn, ev.rawX, ev.rawY)) {
+                    postDelayed(toggleFloatingRunnable, delay)
+                } else if (!isOnDeleteKey(ev.rawX, ev.rawY) && moveDragListener?.canMove() == true) {
+                    postDelayed(moveStartRunnable, delay)
                 }
             }
 
             MotionEvent.ACTION_MOVE -> {
                 if (moveDragging) {
-                    moveDragListener?.onMove(ev.rawY - moveLastRawY)
-                    moveLastRawY = ev.rawY
+                    if (moveGestureIsDrag) {
+                        moveDragListener?.onMove(ev.rawY - moveLastRawY)
+                        moveLastRawY = ev.rawY
+                    }
                     return true
                 }
                 val slop = ViewConfiguration.get(context).scaledTouchSlop
@@ -319,19 +350,23 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
                     kotlin.math.abs(ev.rawY - moveDownRawY) > slop
                 ) {
                     removeCallbacks(moveStartRunnable)
+                    removeCallbacks(toggleFloatingRunnable)
                 }
             }
 
             MotionEvent.ACTION_POINTER_DOWN -> {
                 if (moveDragging) return true
                 removeCallbacks(moveStartRunnable)
+                removeCallbacks(toggleFloatingRunnable)
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 removeCallbacks(moveStartRunnable)
+                removeCallbacks(toggleFloatingRunnable)
                 if (moveDragging) {
                     moveDragging = false
-                    moveDragListener?.onMoveEnd()
+                    if (moveGestureIsDrag) moveDragListener?.onMoveEnd()
+                    moveGestureIsDrag = false
                     return true
                 }
             }

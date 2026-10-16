@@ -46,6 +46,34 @@ class ClearKeyboardController(
         applyLift(true)
     }
 
+    private var floatingOn: Boolean? = null
+
+    private fun isFloatingOn(ctx: android.content.Context): Boolean =
+        floatingOn ?: prefs(ctx).getBoolean(PREF_FLOATING, false).also { floatingOn = it }
+
+    /** フローティング中か（長押しで上下に動かせる状態か） */
+    fun canMove(): Boolean {
+        val c = container ?: return false
+        return isActive() && isFloatingOn(c.context)
+    }
+
+    /** 記号キーの長押し: 画面下に固定 ⇔ 浮かせる */
+    fun toggleFloating() {
+        val c = container ?: return
+        val next = !isFloatingOn(c.context)
+        floatingOn = next
+        if (liftPx < 0f) liftPx = prefs(c.context).getFloat(PREF_LIFT, 0f)
+        if (next && liftPx < 1f) {
+            // 初めて浮かせるときは画面の 1/3 くらいの高さに出す
+            liftPx = c.resources.displayMetrics.heightPixels / 3f
+        }
+        prefs(c.context).edit()
+            .putBoolean(PREF_FLOATING, next)
+            .putFloat(PREF_LIFT, liftPx)
+            .apply()
+        applyLift(isActive())
+    }
+
     fun saveLift() {
         val c = container ?: return
         prefs(c.context).edit().putFloat(PREF_LIFT, liftPx.coerceAtLeast(0f)).apply()
@@ -54,7 +82,7 @@ class ClearKeyboardController(
     private fun applyLift(active: Boolean) {
         val c = container ?: return
         if (liftPx < 0f) liftPx = prefs(c.context).getFloat(PREF_LIFT, 0f)
-        val bottom = if (active) liftPx.toInt() else 0
+        val bottom = if (active && isFloatingOn(c.context)) liftPx.toInt() else 0
         if (c.paddingBottom != bottom) c.setPadding(0, 0, 0, bottom)
     }
 
@@ -125,6 +153,7 @@ class ClearKeyboardController(
 }
 
 private const val PREF_LIFT = "clear_keyboard_lift_px"
+private const val PREF_FLOATING = "clear_keyboard_floating"
 
 /** フローティング表示のときも、日本語テンキー中は格子だけにする。 */
 class FloatingClearChrome(
