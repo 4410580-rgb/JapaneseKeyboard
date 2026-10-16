@@ -285,6 +285,6 @@ private class ClearChrome {
     }
 
     companion object {
-        private const val SCRIM_ALPHA = 150
+        private const val SCRIM_ALPHA = 255 // 候補の段は不透明
     }
 }
