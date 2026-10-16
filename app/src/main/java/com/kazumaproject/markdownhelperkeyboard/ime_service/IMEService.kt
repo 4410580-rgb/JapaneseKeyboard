@@ -1737,6 +1737,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
     private val clearKeyboard = ClearKeyboardController(
         isAllowed = { isClearKeyboardAllowed() },
         hasCandidates = { clearStripHasCandidates() },
+        requestKeyboardRelayout = { mainLayoutBinding?.let { updateKeyboardLayout(it) } },
         onActiveChanged = { active, mainView -> onClearKeyboardActiveChanged(active, mainView) },
     )
 
@@ -20244,6 +20245,8 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
             heightPx = heightPx,
             candidateStripHeightPx = when {
                 floatingCandidateSurfaceActive -> null
+                // 透過キーボード: 候補の段の太さを格子1段（テンキーの高さの 1/4）ちょうどにする
+                clearKeyboard.stripMatchesGridRow() && heightPx > 0 -> heightPx / 4
                 keyboardSkinId == KeyboardSkinId.CUPERTINO_CLASSIC ->
                     applicationContext.dpToPx(candidateStripHeightDp)
                 else -> ViewGroup.LayoutParams.WRAP_CONTENT

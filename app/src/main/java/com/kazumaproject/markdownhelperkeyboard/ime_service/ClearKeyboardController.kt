@@ -19,6 +19,8 @@ import com.kazumaproject.markdownhelperkeyboard.databinding.MainLayoutBinding
 class ClearKeyboardController(
     private val isAllowed: () -> Boolean,
     private val hasCandidates: () -> Boolean,
+    /** 候補の段の太さが変わるので、キーボードの寸法を計算し直してもらう */
+    private val requestKeyboardRelayout: () -> Unit,
     private val onActiveChanged: (active: Boolean, mainView: MainLayoutBinding) -> Unit,
 ) {
     private var container: FrameLayout? = null
@@ -230,6 +232,7 @@ class ClearKeyboardController(
         }
         if (context != lastContext) {
             lastContext = context
+            container?.post { requestKeyboardRelayout() }
             if (!context) {
                 chrome.restore(view.root, view.suggestionViewParent, view.candidateTabLayout)
                 view.suggestionViewParent.translationY = 0f
