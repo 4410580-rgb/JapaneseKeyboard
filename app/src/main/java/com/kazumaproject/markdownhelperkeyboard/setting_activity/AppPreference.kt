@@ -645,13 +645,13 @@ object AppPreference {
             TfbiFlickStartPositionMode.TOUCH_POINT.preferenceValue
         )
 
-    private val CANDIDATE_LETTER_SIZE = Pair("candidate_letter_size_preference", 14.0f)
+    private val CANDIDATE_LETTER_SIZE = Pair("candidate_letter_size_preference", 20.0f)
 
-    private val CANDIDATE_VIEW_HEIGHT_DP = Pair("candidate_view_height_dp_preference", 60)
+    private val CANDIDATE_VIEW_HEIGHT_DP = Pair("candidate_view_height_dp_preference", 44)
     private val CANDIDATE_VIEW_EMPTY_HEIGHT_DP =
-        Pair("candidate_view_empty_height_dp_preference", 60)
+        Pair("candidate_view_empty_height_dp_preference", 40)
     private val CANDIDATE_VIEW_HEIGHT_PORTRAIT_COLUMN_1_DP =
-        Pair("candidate_view_height_portrait_column_1_dp_preference", 60)
+        Pair("candidate_view_height_portrait_column_1_dp_preference", 44)
     private val CANDIDATE_VIEW_HEIGHT_PORTRAIT_COLUMN_2_DP =
         Pair("candidate_view_height_portrait_column_2_dp_preference", 80)
     private val CANDIDATE_VIEW_HEIGHT_PORTRAIT_COLUMN_3_DP =

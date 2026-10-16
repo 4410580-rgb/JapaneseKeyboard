@@ -1737,7 +1737,6 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         }
         candidateSurfaceHost?.setPanelBackgroundAlpha(candidatePanelBackgroundAlpha())
         updateCandidateStripPresentation(mainView)
-        if (active) clearKeyboard.updatePreview(currentInputConnection)
     }
 
     private fun candidatePanelBackgroundAlpha(): Int =
@@ -7571,6 +7570,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
     }
 
     private var floatingKeyboardPanel: com.kazumaproject.markdownhelperkeyboard.ime_service.floating_keyboard.FloatingKeyboardPanel? = null
+    private var floatingClearChromeBinding: FloatingKeyboardLayoutBinding? = null
 
     private fun floatingPanel(binding: FloatingKeyboardLayoutBinding): com.kazumaproject.markdownhelperkeyboard.ime_service.floating_keyboard.FloatingKeyboardPanel {
         val existing = floatingKeyboardPanel
@@ -8375,7 +8375,6 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         super.onUpdateSelection(
             oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd
         )
-        clearKeyboard.updatePreview(currentInputConnection)
         if (oldSelStart != newSelStart || oldSelEnd != newSelEnd) {
             horizontalCursorSelectionRevision.incrementAndGet()
         }
@@ -11281,6 +11280,14 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         floatingKeyboardLayoutBinding.keyboardViewFloating.setOnFlickTextPreviewListener(
             tenKeyFlickTextPreviewListener
         )
+        floatingKeyboardLayoutBinding.keyboardViewFloating.setClearGridRequested(true)
+        if (floatingClearChromeBinding !== floatingKeyboardLayoutBinding) {
+            floatingClearChromeBinding = floatingKeyboardLayoutBinding
+            FloatingClearChrome(floatingKeyboardLayoutBinding) { active ->
+                floatingKeyboardPanel?.background?.alpha = if (active) 0 else 255
+                if (!active) applyFloatingKeyboardContainerBackgrounds(floatingKeyboardLayoutBinding)
+            }
+        }
         floatingKeyboardLayoutBinding.keyboardViewFloating.applyKeyboardTheme(
             skinId = keyboardSkinId,
             themeMode = keyboardThemeMode ?: "default",
@@ -11857,9 +11864,8 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                         }
 
                         GestureType.FlickTop -> {
-                            if (isDeleteUpFlickPreference == true) {
-                                deleteWordOrSymbolsAfterCursor(insertString)
-                            }
+                            // Simeji と同じく、⌫ を上にはじくと全削除
+                            deleteAllTextInField()
                         }
 
                         GestureType.FlickBottom -> {
@@ -12051,9 +12057,8 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                         }
 
                         GestureType.FlickTop -> {
-                            if (isDeleteUpFlickPreference == true) {
-                                deleteWordOrSymbolsAfterCursor(insertString)
-                            }
+                            // Simeji と同じく、⌫ を上にはじくと全削除
+                            deleteAllTextInField()
                         }
 
                         GestureType.FlickBottom -> {
@@ -12328,7 +12333,8 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                 handleSpaceLongAction()
             }
 
-            Key.SideKeySymbol -> {}
+            // 記号キーの長押しでフローティング表示を切り替える
+            Key.SideKeySymbol -> toggleKeyboardFloatingModeFromShortcut()
             else -> {}
         }
     }
@@ -12378,7 +12384,8 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                 handleSpaceLongActionFloating()
             }
 
-            Key.SideKeySymbol -> {}
+            // 記号キーの長押しでフローティング表示を切り替える
+            Key.SideKeySymbol -> toggleKeyboardFloatingModeFromShortcut()
             else -> {}
         }
     }
@@ -27905,6 +27912,28 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
      * - カーソル直後の文字がそれ以外の場合：その単語を末尾まで削除します。
      * - PreEdit / stringInTail がある場合は committed text を消さず、stringInTail を削除します。
      */
+    /** 入力欄の文字をすべて消す（⌫ の上フリック）。 */
+    private fun deleteAllTextInField() {
+        invalidateZeroQueryForEditorMutation()
+        val ic = currentInputConnection ?: return
+        _inputString.update { "" }
+        stringInTail.set("")
+        isHenkan.set(false)
+        setSuggestionAdapterSuggestionsOnMain(emptyList())
+        ic.beginBatchEdit()
+        try {
+            ic.setComposingText("", 1)
+            ic.finishComposingText()
+            // 選択中の文字があれば先に消す
+            ic.commitText("", 1)
+            val before = ic.getTextBeforeCursor(100_000, 0)?.length ?: 0
+            val after = ic.getTextAfterCursor(100_000, 0)?.length ?: 0
+            if (before > 0 || after > 0) ic.deleteSurroundingText(before, after)
+        } finally {
+            ic.endBatchEdit()
+        }
+    }
+
     private fun deleteWordOrSymbolsAfterCursor(insertString: String) {
         invalidateZeroQueryForEditorMutation()
         val inputConnection = currentInputConnection ?: return

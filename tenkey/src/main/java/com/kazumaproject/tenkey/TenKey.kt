@@ -266,27 +266,27 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
     }
 
     private fun applyClearGridVisuals() {
-        val density = resources.displayMetrics.density
-        val white = Color.WHITE
-        val whiteTint = ColorStateList.valueOf(white)
         setBackgroundColor(Color.TRANSPARENT)
         clearGridKeys().forEach { view ->
             if (view.background !is com.kazumaproject.tenkey.view.ClearKeyDrawable) {
                 view.background = com.kazumaproject.tenkey.view.ClearKeyDrawable()
             }
+            // 配置は覚えているので文字・アイコンは出さず、格子だけにする
             when (view) {
                 is AppCompatButton -> {
-                    view.setTextColor(white)
-                    view.setShadowLayer(3f * density, 0f, 0f, 0xE6000000.toInt())
+                    view.setTextColor(Color.TRANSPARENT)
+                    view.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
                 }
 
-                is AppCompatImageButton -> ImageViewCompat.setImageTintList(view, whiteTint)
+                is AppCompatImageButton -> view.imageAlpha = 0
             }
         }
         binding.sideKeySymbolModeContainer.setKeyBackground(
             com.kazumaproject.tenkey.view.ClearKeyDrawable()
         )
-        binding.sideKeySymbolModeContainer.setKeyTint(whiteTint)
+        binding.sideKeySymbolModeContainer.setKeyTint(
+            ColorStateList.valueOf(Color.TRANSPARENT)
+        )
     }
 
     private var lastPreviousKeyDrawable: Drawable? = null
@@ -318,6 +318,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
     private fun clearKeyLabelShadows() {
         clearGridKeys().forEach { view ->
             (view as? AppCompatButton)?.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
+            (view as? AppCompatImageButton)?.imageAlpha = 255
         }
     }
 
@@ -2628,9 +2629,10 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         return FlickGestureMath.thresholdPxForSensitivity(
             sensitivity = sensitivity,
             scaledTouchSlopPx = ViewConfiguration.get(context).scaledTouchSlop,
-            sensitiveMultiplier = 1.5f,
-            normalMultiplier = 3.5f,
-            stableMultiplier = 4.25f
+            // 短いスライドでフリックとして拾う（元: 1.5 / 3.5 / 4.25）
+            sensitiveMultiplier = 0.5f,
+            normalMultiplier = 1.0f,
+            stableMultiplier = 2.0f
         )
     }
 
@@ -3121,7 +3123,8 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
     }
 
     private fun switchToNumberMode() {
-        if (useThreeStateKeyboard) return
+        // 透過（Simeji 配置）では左列の「123」で数字に切り替える
+        if (useThreeStateKeyboard && !clearGridApplied) return
         rememberTwoStateNumberReturnTargetFromCurrentMode()
         if (useQwertyNumberWhenThreeStateOff) {
             qwertyNumberModeRequestedListener?.invoke()

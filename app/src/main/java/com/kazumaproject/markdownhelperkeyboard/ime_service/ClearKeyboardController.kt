@@ -1,19 +1,12 @@
 package com.kazumaproject.markdownhelperkeyboard.ime_service
 
-import android.graphics.Color
 import android.graphics.Region
-import android.graphics.drawable.GradientDrawable
 import android.inputmethodservice.InputMethodService.Insets
-import android.text.TextUtils
-import android.util.TypedValue
-import android.view.Gravity
 import android.view.View
-import android.view.ViewGroup
 import android.view.ViewTreeObserver
-import android.view.inputmethod.InputConnection
 import android.widget.FrameLayout
-import android.widget.TextView
 import androidx.core.view.isVisible
+import com.kazumaproject.markdownhelperkeyboard.databinding.FloatingKeyboardLayoutBinding
 import com.kazumaproject.markdownhelperkeyboard.databinding.MainLayoutBinding
 
 /**
@@ -21,7 +14,6 @@ import com.kazumaproject.markdownhelperkeyboard.databinding.MainLayoutBinding
  *
  * - 有効な間はアプリの画面を縮めない（Samsung のフローティングと同じ insets）。
  *   キーボードの裏にアプリの文章がそのまま見える。
- * - アプリの入力欄はキーの裏に回るので、キーボードの上に「書いている文章の末尾」を1行出す。
  * - 候補の段は半透明の暗い帯にする（候補が読めるように）。
  */
 class ClearKeyboardController(
@@ -30,53 +22,19 @@ class ClearKeyboardController(
 ) {
     private var container: FrameLayout? = null
     private var mainView: MainLayoutBinding? = null
-    private var preview: TextView? = null
     private var lastActive: Boolean? = null
-    private var previewText: CharSequence = ""
+    private val chrome = ClearChrome()
 
     private val preDrawListener = ViewTreeObserver.OnPreDrawListener {
         sync()
         true
     }
 
-    private val rootLayoutListener =
-        View.OnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
-            if (bottom - top != oldBottom - oldTop) positionPreview()
-        }
-
     fun attach(container: FrameLayout, mainView: MainLayoutBinding) {
         detach()
         this.container = container
         this.mainView = mainView
-        val ctx = container.context
-        val density = ctx.resources.displayMetrics.density
-        val tv = TextView(ctx).apply {
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-            setSingleLine(true)
-            ellipsize = TextUtils.TruncateAt.START
-            gravity = Gravity.CENTER_VERTICAL or Gravity.START
-            val padH = (12 * density).toInt()
-            val padV = (4 * density).toInt()
-            setPadding(padH, padV, padH, padV)
-            setShadowLayer(3f * density, 0f, 0f, 0xE6000000.toInt())
-            background = GradientDrawable().apply { setColor(0x99000000.toInt()) }
-            isClickable = false
-            isFocusable = false
-            visibility = View.GONE
-            text = previewText
-        }
-        container.addView(
-            tv,
-            FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.BOTTOM
-            )
-        )
-        preview = tv
         mainView.root.viewTreeObserver.addOnPreDrawListener(preDrawListener)
-        mainView.root.addOnLayoutChangeListener(rootLayoutListener)
         lastActive = null
     }
 
@@ -85,10 +43,7 @@ class ClearKeyboardController(
             if (root.viewTreeObserver.isAlive) {
                 root.viewTreeObserver.removeOnPreDrawListener(preDrawListener)
             }
-            root.removeOnLayoutChangeListener(rootLayoutListener)
         }
-        preview?.let { (it.parent as? ViewGroup)?.removeView(it) }
-        preview = null
         mainView = null
         container = null
         lastActive = null
@@ -113,37 +68,10 @@ class ClearKeyboardController(
         outInsets.contentTopInsets = windowHeight
         outInsets.visibleTopInsets = windowHeight
         outInsets.touchableInsets = Insets.TOUCHABLE_INSETS_REGION
-        // 触れるのはキーボード本体と候補の段だけ。上の1行プレビューは素通しにする。
-        val region = Region(loc[0], loc[1], loc[0] + root.width, loc[1] + root.height)
-        outInsets.touchableRegion.set(region)
+        outInsets.touchableRegion.set(
+            Region(loc[0], loc[1], loc[0] + root.width, loc[1] + root.height)
+        )
         return true
-    }
-
-    /** 書いている文章の末尾をプレビューに出す。 */
-    fun updatePreview(connection: InputConnection?) {
-        val tv = preview ?: return
-        if (!isActive()) return
-        val before = runCatching { connection?.getTextBeforeCursor(PREVIEW_CHARS, 0) }
-            .getOrNull() ?: ""
-        // 改行より前は表示しない（1行で最後の行だけ見せる）
-        val lastLine = before.toString().substringAfterLast('\n')
-        if (lastLine == previewText.toString()) return
-        previewText = lastLine
-        tv.text = lastLine
-        val shouldShow = lastLine.isNotEmpty()
-        if (tv.isVisible != shouldShow) tv.isVisible = shouldShow
-    }
-
-    private fun positionPreview() {
-        val tv = preview ?: return
-        val root = mainView?.root ?: return
-        val lp = tv.layoutParams as? FrameLayout.LayoutParams ?: return
-        val rootMargin = (root.layoutParams as? ViewGroup.MarginLayoutParams)?.bottomMargin ?: 0
-        val bottom = root.height + rootMargin
-        if (lp.bottomMargin != bottom) {
-            lp.bottomMargin = bottom
-            tv.post { tv.layoutParams = lp }
-        }
     }
 
     private fun sync() {
@@ -151,46 +79,78 @@ class ClearKeyboardController(
         val active = isActive()
         if (active != lastActive) {
             lastActive = active
-            if (!active) {
-                preview?.isVisible = false
-                restoreChrome(view)
-            } else {
-                preview?.isVisible = previewText.isNotEmpty()
-                positionPreview()
-            }
+            if (!active) chrome.restore(view.root, view.suggestionViewParent, view.candidateTabLayout)
             onActiveChanged(active, view)
             // insets を取り直してもらう
             container?.post { container?.requestLayout() }
         }
-        if (active) enforceChrome(view)
+        if (active) {
+            chrome.enforce(
+                transparent = listOf(view.root),
+                scrim = listOf(view.suggestionViewParent, view.candidateTabLayout),
+                hidden = listOf(view.keyboardBackgroundContainer, view.shortcutToolbarRecyclerview),
+            )
+        }
+    }
+}
+
+/** フローティング表示のときも、日本語テンキー中は格子だけにする。 */
+class FloatingClearChrome(
+    private val binding: FloatingKeyboardLayoutBinding,
+    private val onActiveChanged: (Boolean) -> Unit,
+) {
+    private var lastActive: Boolean? = null
+    private val chrome = ClearChrome()
+
+    private val preDrawListener = ViewTreeObserver.OnPreDrawListener {
+        sync()
+        true
     }
 
+    init {
+        binding.root.viewTreeObserver.addOnPreDrawListener(preDrawListener)
+    }
+
+    private fun sync() {
+        val active = binding.keyboardViewFloating.isVisible &&
+            binding.keyboardViewFloating.isClearGridApplied &&
+            !binding.floatingSymbolKeyboard.isVisible
+        if (active != lastActive) {
+            lastActive = active
+            if (!active) chrome.restore(binding.root, binding.suggestionViewParent)
+            onActiveChanged(active)
+        }
+        if (active) {
+            chrome.enforce(
+                transparent = listOf(binding.root),
+                scrim = listOf(binding.suggestionViewParent),
+                hidden = listOf(binding.floatingKeyboardBackgroundContainer),
+            )
+        }
+    }
+}
+
+private class ClearChrome {
     private val savedVisibility = HashMap<View, Int>()
 
-    private fun enforceChrome(view: MainLayoutBinding) {
-        view.root.background?.let { if (it.alpha != 0) it.alpha = 0 }
-        view.suggestionViewParent.background?.let { if (it.alpha != SCRIM_ALPHA) it.alpha = SCRIM_ALPHA }
-        view.candidateTabLayout.background?.let { if (it.alpha != SCRIM_ALPHA) it.alpha = SCRIM_ALPHA }
-        hide(view.keyboardBackgroundContainer)
-        hide(view.shortcutToolbarRecyclerview)
+    fun enforce(transparent: List<View>, scrim: List<View>, hidden: List<View>) {
+        transparent.forEach { v -> v.background?.let { if (it.alpha != 0) it.alpha = 0 } }
+        scrim.forEach { v -> v.background?.let { if (it.alpha != SCRIM_ALPHA) it.alpha = SCRIM_ALPHA } }
+        hidden.forEach { v ->
+            if (v.visibility != View.GONE) {
+                savedVisibility.putIfAbsent(v, v.visibility)
+                v.visibility = View.GONE
+            }
+        }
     }
 
-    private fun hide(v: View) {
-        if (v.visibility == View.GONE) return
-        savedVisibility.putIfAbsent(v, v.visibility)
-        v.visibility = View.GONE
-    }
-
-    private fun restoreChrome(view: MainLayoutBinding) {
-        view.root.background?.alpha = 255
-        view.suggestionViewParent.background?.alpha = 255
-        view.candidateTabLayout.background?.alpha = 255
+    fun restore(vararg views: View) {
+        views.forEach { it.background?.alpha = 255 }
         savedVisibility.forEach { (v, vis) -> v.visibility = vis }
         savedVisibility.clear()
     }
 
     companion object {
-        private const val PREVIEW_CHARS = 200
         private const val SCRIM_ALPHA = 150
     }
 }
