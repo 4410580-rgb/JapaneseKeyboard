@@ -196,53 +196,117 @@ class ClearKeyboardController(
         }
     }
 
+    /**
+     * 候補一覧（全画面の候補）を開いている状態。テンキーが透過モードだったときだけ、
+     * 一覧もテンキーと同じ大きさに収める。
+     */
+    private fun isListMode(view: MainLayoutBinding): Boolean =
+        isAllowed() &&
+            !view.keyboardView.isVisible &&
+            view.candidatesRowView.isVisible &&
+            view.keyboardView.isClearGridApplied &&
+            !view.keyboardSymbolView.isVisible
+
+    /** 候補の段の高さを格子1段に合わせるか（テンキーか、その候補一覧を出しているとき） */
+    fun stripMatchesGridRow(): Boolean {
+        val view = mainView ?: return false
+        return isActive() || isListMode(view)
+    }
+
+    private var lastContext: Boolean? = null
+    private var listBackgroundSaved = false
+    private var savedListBackground: android.graphics.drawable.Drawable? = null
+
     private fun sync() {
         val view = mainView ?: return
         val active = isActive()
+        val listMode = !active && isListMode(view)
+        val context = active || listMode
         if (active != lastActive) {
             lastActive = active
-            if (!active) {
-                chrome.restore(view.root, view.suggestionViewParent, view.candidateTabLayout)
-                view.suggestionViewParent.translationY = 0f
-            }
             onActiveChanged(active, view)
             // insets を取り直してもらう
             container?.post { container?.requestLayout() }
         }
+        if (context != lastContext) {
+            lastContext = context
+            if (!context) {
+                chrome.restore(view.root, view.suggestionViewParent, view.candidateTabLayout)
+                view.suggestionViewParent.translationY = 0f
+            }
+        }
+        if (!listMode) leaveListMode(view)
         val floating = isFloatingActive()
         if (!dragging && floating != lastFloatingActive) {
             lastFloatingActive = floating
             applyLift(floating)
             container?.post { container?.requestLayout() }
         }
-        if (active) {
+        if (context) {
             chrome.enforce(
                 transparent = listOf(view.root),
                 scrim = listOf(view.suggestionViewParent, view.candidateTabLayout),
-                hidden = listOf(
-                    view.keyboardBackgroundContainer,
-                    view.shortcutToolbarRecyclerview,
-                    // 候補一覧を開く矢印は左上のマスが代わりをするので出さない（候補の幅を優先）
-                    view.suggestionVisibility,
-                ),
+                hidden = buildList {
+                    add(view.keyboardBackgroundContainer)
+                    add(view.shortcutToolbarRecyclerview)
+                    // 候補一覧を開く矢印は左上のマスの長押しが代わりをするので出さない（候補の幅を優先）
+                    if (active) add(view.suggestionVisibility)
+                },
             )
-            overlayStripOnTopRow(view)
         }
+        if (active) {
+            overlayStripOnTopRow(view, view.keyboardView)
+        } else if (listMode) {
+            enterListMode(view)
+            overlayStripOnTopRow(view, view.candidatesRowView)
+        }
+        view.keyboardView.setCandidateOverlay(active && hasCandidates())
         // 候補が無いときは候補の段ごと見えなくする（浮かせているときは触れる範囲からも外している）
         val stripAlpha = if ((active || floating) && !hasCandidates()) 0f else 1f
         if (view.suggestionViewParent.alpha != stripAlpha) view.suggestionViewParent.alpha = stripAlpha
     }
 
     /**
-     * 候補の段をテンキーの一番上の段に重ねる。キーが上にあるので触ってもキー入力になり、
-     * 候補は ← → で選ぶ。上に空いた分はアプリ側に返る（insets は中身の上端で決める）。
+     * 候補一覧をテンキーと同じ大きさに収める: 候補の段を一覧の一番上の段に重ね、
+     * 一覧の中身はその下から並べる。
      */
-    private fun overlayStripOnTopRow(view: MainLayoutBinding) {
+    private fun enterListMode(view: MainLayoutBinding) {
+        val list = view.candidatesRowView
         val strip = view.suggestionViewParent
-        val keys = view.keyboardView
-        if (keys.height == 0 || strip.height == 0) return
-        val rowHeight = keys.height / 4f
-        val targetTop = keys.top + ((rowHeight - strip.height) / 2f).coerceAtLeast(0f)
+        if (!listBackgroundSaved) {
+            listBackgroundSaved = true
+            savedListBackground = list.background
+            list.background = strip.background?.constantState?.newDrawable()?.mutate()
+            list.clipToPadding = true
+        }
+        list.background?.let { if (it.alpha != 255) it.alpha = 255 }
+        val rowHeight = (list.height / 4f).toInt()
+        if (rowHeight > 0 && list.paddingTop != rowHeight) {
+            list.setPadding(list.paddingLeft, rowHeight, list.paddingRight, list.paddingBottom)
+        }
+        // 一覧の上に候補の段を描く（触っても一覧ではなく候補の段に届く）
+        if (strip.translationZ != 1f) strip.translationZ = 1f
+    }
+
+    private fun leaveListMode(view: MainLayoutBinding) {
+        if (!listBackgroundSaved) return
+        listBackgroundSaved = false
+        val list = view.candidatesRowView
+        list.background = savedListBackground
+        savedListBackground = null
+        list.setPadding(list.paddingLeft, 0, list.paddingRight, list.paddingBottom)
+        view.suggestionViewParent.translationZ = 0f
+    }
+
+    /**
+     * 候補の段を一番上の段に重ねる。テンキーのときはキーが上にあるので、触れるのは左上のマスだけ
+     * （TenKey が受けて候補のタップ・スライド・長押しに変える）。上に空いた分はアプリ側に返る。
+     */
+    private fun overlayStripOnTopRow(view: MainLayoutBinding, base: View) {
+        val strip = view.suggestionViewParent
+        if (base.height == 0 || strip.height == 0) return
+        val rowHeight = base.height / 4f
+        val targetTop = base.top + ((rowHeight - strip.height) / 2f).coerceAtLeast(0f)
         val dy = targetTop - strip.top
         if (kotlin.math.abs(strip.translationY - dy) > 0.5f) strip.translationY = dy
     }
@@ -308,6 +372,6 @@ private class ClearChrome {
     }
 
     companion object {
-        private const val SCRIM_ALPHA = 190 // 候補の段は格子に重ねて少し透かす
+        private const val SCRIM_ALPHA = 255 // 候補の段は不透明
     }
 }

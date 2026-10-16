@@ -1806,6 +1806,15 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         }
     }
 
+    /** 左上のマスのタップ: 指の横位置にある候補を、候補欄を直接タップしたのと同じように選ぶ */
+    private fun tapClearCandidateAt(rawX: Float) {
+        val rv = mainLayoutBinding?.suggestionRecyclerView ?: return
+        val loc = IntArray(2)
+        rv.getLocationOnScreen(loc)
+        val child = rv.findChildViewUnder(rawX - loc[0], rv.height / 2f) ?: rv.getChildAt(0)
+        child?.performClick()
+    }
+
     private fun clearStripHasCandidates(): Boolean =
         inputString.value.isNotEmpty() || suggestionAdapter?.suggestions?.isNotEmpty() == true
 
@@ -11571,6 +11580,14 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                 override fun onMoveEnd() = clearKeyboard.saveLift()
                 override fun onLineMove(up: Boolean) = moveCursorOneLine(up)
                 override fun onCharMove(right: Boolean) = moveCursorOneChar(right)
+                override fun onCandidateTap(rawX: Float) = tapClearCandidateAt(rawX)
+                override fun onCandidateStep(right: Boolean) {
+                    val mv = mainLayoutBinding ?: return
+                    moveClearCandidate(right, mv, suggestionAdapter?.suggestions.orEmpty(), inputString.value)
+                }
+                override fun onCandidateListToggle() {
+                    _suggestionViewStatus.update { !it }
+                }
             })
             applyKeyboardTheme(
                 skinId = keyboardSkinId,
@@ -20103,6 +20120,11 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
             emptyHeightDp = prefs.candidateEmptyHeight
         )
         val candidateStripHeightDp = if (
+            !floatingCandidateSurfaceActive && clearKeyboard.stripMatchesGridRow() && heightPx > 0
+        ) {
+            // 透過キーボード: 候補の段の太さを格子1段（テンキーの高さの 1/4）に合わせる
+            (heightPx / 4f / resources.displayMetrics.density).roundToInt()
+        } else if (
             !floatingCandidateSurfaceActive && keyboardSkinId == KeyboardSkinId.CUPERTINO_CLASSIC
         ) {
             com.kazumaproject.markdownhelperkeyboard.ime_service.composing_guide.CupertinoClassicCandidateChrome

@@ -269,6 +269,12 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         fun onLineMove(up: Boolean)
         /** ← を右に / → を左にはじいたとき: 反対向きに1文字 */
         fun onCharMove(right: Boolean)
+        /** 候補が出ている間の左上のマス: タップ（指の位置の候補を選ぶ） */
+        fun onCandidateTap(rawX: Float)
+        /** 候補が出ている間の左上のマス: スライドで候補の選択を1つ動かす */
+        fun onCandidateStep(right: Boolean)
+        /** 候補が出ている間の左上のマス: 長押しで候補一覧 */
+        fun onCandidateListToggle()
     }
 
     private var moveDragListener: MoveDragListener? = null
@@ -367,8 +373,132 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         moveDragListener?.onMoveStart()
     }
 
+    // ---- 候補が出ている間の左上のマス: タップ / パソコンのカーソルのようなスライド / 長押し ----
+    private var candidateOverlay = false
+    private var candidateGesture = false
+    private var candidateSliding = false
+    private var candidateLongPressed = false
+    private var candidateLastRawX = 0f
+    private var candidateLastTime = 0L
+    private var candidateAccum = 0f
+    private var candidateEdgeDir = 0
+    private val candidateDimPaint = android.graphics.Paint().apply { color = 0x99000000.toInt() }
+    private val candidateListRunnable = Runnable {
+        if (!candidateGesture || candidateSliding) return@Runnable
+        candidateLongPressed = true
+        moveDragListener?.onCandidateListToggle()
+    }
+    private val candidateEdgeRunnable = object : Runnable {
+        override fun run() {
+            if (!candidateGesture || candidateEdgeDir == 0) return
+            moveDragListener?.onCandidateStep(candidateEdgeDir > 0)
+            postDelayed(this, CANDIDATE_EDGE_REPEAT_MS)
+        }
+    }
+
+    /** 候補が出ているか（左上のマスを候補の操作に使い、ほかの候補欄を暗くする） */
+    fun setCandidateOverlay(shown: Boolean) {
+        if (candidateOverlay == shown) return
+        candidateOverlay = shown
+        invalidate()
+    }
+
+    private fun handleCandidateGesture(ev: MotionEvent): Boolean {
+        val density = resources.displayMetrics.density
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                candidateGesture = true
+                candidateSliding = false
+                candidateLongPressed = false
+                candidateAccum = 0f
+                candidateEdgeDir = 0
+                moveDownRawX = ev.rawX
+                candidateLastRawX = ev.rawX
+                candidateLastTime = ev.eventTime
+                postDelayed(candidateListRunnable, longPressTimeout)
+                binding.keyReturn.isPressed = true
+                invalidate()
+            }
+
+            MotionEvent.ACTION_MOVE -> {
+                if (candidateLongPressed) return true
+                if (!candidateSliding &&
+                    kotlin.math.abs(ev.rawX - moveDownRawX) > ViewConfiguration.get(context).scaledTouchSlop
+                ) {
+                    candidateSliding = true
+                    removeCallbacks(candidateListRunnable)
+                    candidateLastRawX = ev.rawX
+                    candidateLastTime = ev.eventTime
+                }
+                if (!candidateSliding) return true
+                // 画面の左右の端では、指の動きに関係なく一定の速さで送り続ける
+                val screenWidth = resources.displayMetrics.widthPixels
+                val edge = screenWidth * CANDIDATE_EDGE_RATIO
+                val edgeDir = when {
+                    ev.rawX < edge -> -1
+                    ev.rawX > screenWidth - edge -> 1
+                    else -> 0
+                }
+                if (edgeDir != candidateEdgeDir) {
+                    candidateEdgeDir = edgeDir
+                    removeCallbacks(candidateEdgeRunnable)
+                    if (edgeDir != 0) post(candidateEdgeRunnable)
+                }
+                if (edgeDir == 0) {
+                    // パソコンのカーソルのように、速く動かすほど1回の動きで多く進む
+                    val dx = ev.rawX - candidateLastRawX
+                    val dt = (ev.eventTime - candidateLastTime).coerceAtLeast(1L)
+                    val speed = kotlin.math.abs(dx) / dt // px/ms
+                    val gain = (0.6f + speed / density * 1.2f).coerceIn(0.6f, 4f)
+                    candidateAccum += dx * gain
+                    val stepPx = CANDIDATE_STEP_DP * density
+                    while (candidateAccum >= stepPx) {
+                        moveDragListener?.onCandidateStep(true)
+                        candidateAccum -= stepPx
+                    }
+                    while (candidateAccum <= -stepPx) {
+                        moveDragListener?.onCandidateStep(false)
+                        candidateAccum += stepPx
+                    }
+                } else {
+                    candidateAccum = 0f
+                }
+                candidateLastRawX = ev.rawX
+                candidateLastTime = ev.eventTime
+            }
+
+            MotionEvent.ACTION_UP -> {
+                val tapped = !candidateSliding && !candidateLongPressed
+                endCandidateGesture()
+                if (tapped) moveDragListener?.onCandidateTap(moveDownRawX)
+            }
+
+            MotionEvent.ACTION_CANCEL -> endCandidateGesture()
+        }
+        return true
+    }
+
+    private fun endCandidateGesture() {
+        candidateGesture = false
+        candidateSliding = false
+        candidateEdgeDir = 0
+        removeCallbacks(candidateListRunnable)
+        removeCallbacks(candidateEdgeRunnable)
+        binding.keyReturn.isPressed = false
+        invalidate()
+    }
+
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         if (!clearGridApplied || moveDragListener == null) return super.dispatchTouchEvent(ev)
+        if (candidateGesture) return handleCandidateGesture(ev)
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN && candidateOverlay &&
+            isOnView(binding.keyReturn, ev.rawX, ev.rawY)
+        ) {
+            stopLineMove()
+            removeCallbacks(moveStartRunnable)
+            removeCallbacks(toggleFloatingRunnable)
+            return handleCandidateGesture(ev)
+        }
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 stopLineMove()
@@ -469,6 +599,12 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
     private companion object LineMoveTiming {
         /** 連続移動の間隔。← → の長押し（1文字ずつ）と同じ 64ms */
         const val LINE_MOVE_FIRST_REPEAT_MS = 64L
+        /** 候補スライド: 等倍のときに候補1つ分進むのに必要な指の移動量 */
+        const val CANDIDATE_STEP_DP = 28f
+        /** 候補スライド: 画面の左右これだけの幅に指があると一定の速さで送る */
+        const val CANDIDATE_EDGE_RATIO = 0.08f
+        /** 候補スライド: 端での送りの間隔 */
+        const val CANDIDATE_EDGE_REPEAT_MS = 110L
     }
 
     private fun clearGridKeys(): List<View> = binding.run {
@@ -553,7 +689,22 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
             }
             if (pressed) canvas.drawRect(left, top, right, bottom, clearPressedPaint)
         }
+        if (candidateOverlay) drawCandidateDim(canvas)
         drawCenterGrid(canvas, half)
+    }
+
+    /** 候補の段のうち、左上のマス以外を暗くして「触れない」ことを示す */
+    private fun drawCandidateDim(canvas: android.graphics.Canvas) {
+        binding.apply {
+            val lp = keyReturn.layoutParams as? LayoutParams
+            val cellLeft = keyReturn.left - (lp?.marginStart ?: 0).toFloat()
+            val cellRight = keyReturn.right + (lp?.marginEnd ?: 0).toFloat()
+            val rowTop = 0f
+            val rowBottom = (keyReturn.bottom + (lp?.bottomMargin ?: 0) +
+                keySoftLeft.top - ((keySoftLeft.layoutParams as? LayoutParams)?.topMargin ?: 0)) / 2f
+            if (cellLeft > 0f) canvas.drawRect(0f, rowTop, cellLeft, rowBottom, candidateDimPaint)
+            canvas.drawRect(cellRight, rowTop, width.toFloat(), rowBottom, candidateDimPaint)
+        }
     }
 
     /** 中央 3 列だけの格子: 縦線 2 本（4 段ぶん）と横線 3 本（3 列ぶん）。 */
