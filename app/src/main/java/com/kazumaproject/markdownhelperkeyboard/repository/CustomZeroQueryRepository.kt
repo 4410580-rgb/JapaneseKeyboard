@@ -196,6 +196,35 @@ class CustomZeroQueryRepository @Inject constructor(
         }
     }
 
+    /**
+     * 続けて確定した2語を後続語候補として覚える（新しいものほど先頭）。
+     * 「フローティング」の直後に「ウィンドウ」を確定したら、次から「フローティング」の後に出す。
+     */
+    suspend fun learnNext(rawKey: String, rawCandidate: String) {
+        val displayKey = rawKey.trim()
+        val lookupKey = CustomZeroQueryKeyNormalizer.normalizeKey(displayKey)
+        val candidate = rawCandidate.trim()
+        if (lookupKey.isEmpty() || candidate.isEmpty()) return
+        val existing = dao.getByLookupKey(lookupKey)
+        val hit = existing.firstOrNull { it.candidate == candidate }
+        if (hit == null) {
+            val now = System.currentTimeMillis()
+            dao.insert(
+                CustomZeroQueryEntry(
+                    lookupKey = lookupKey,
+                    displayKey = displayKey,
+                    candidate = candidate,
+                    rank = (existing.minOfOrNull { it.rank } ?: 1) - 1,
+                    enabled = true,
+                    createdAt = now,
+                    updatedAt = now,
+                )
+            )
+        } else {
+            reorder(lookupKey, listOf(hit.id) + existing.filter { it.id != hit.id }.map { it.id })
+        }
+    }
+
     suspend fun deleteEntry(id: Long) = dao.deleteById(id)
 
     suspend fun deleteGroup(lookupKey: String) = dao.deleteByLookupKey(lookupKey)

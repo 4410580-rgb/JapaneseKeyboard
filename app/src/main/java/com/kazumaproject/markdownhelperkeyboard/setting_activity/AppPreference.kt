@@ -235,7 +235,7 @@ object AppPreference {
     private val SUPPRESS_HENTAIGANA_CANDIDATES_PREFERENCE =
         Pair("suppress_hentaigana_candidates_preference", false)
     private val ZERO_QUERY_SUGGESTION_PREFERENCE =
-        Pair("zero_query_suggestion_preference", false)
+        Pair("zero_query_suggestion_preference", true)
     private val NG_WORD_ENABLE_PREFERENCE = Pair("ng_word_enable_preference", true)
     private val N_BEST_PREFERENCE = Pair("n_best_preference", 4)
     private val CONVERSION_BEAM_WIDTH_PREFERENCE = Pair("conversion_beam_width_preference", 20)

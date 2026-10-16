@@ -1376,9 +1376,25 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         return isNotEmpty() && all { isSelectionActionCandidate(it) }
     }
 
+    // 直前に確定した語（後続語候補の学習用）
+    private var lastCommittedForNextWordLearning: String? = null
+
     private fun rememberZeroQueryKeyAfterCommit(committedText: String) {
         if (committedText.isBlank()) return
+        learnNextWordPair(committedText)
         pendingZeroQueryKeyAfterCommit = committedText
+    }
+
+    private fun learnNextWordPair(committedText: String) {
+        val previous = lastCommittedForNextWordLearning
+        lastCommittedForNextWordLearning = committedText.trim().takeIf { it.length in 1..20 }
+        if (previous == null || isPrivateMode || isLearnDictionaryMode != true) return
+        val next = committedText.trim()
+        if (next.isEmpty() || next.length > 20) return
+        ioScope.launch {
+            runCatching { customZeroQueryRepository.learnNext(previous, next) }
+                .onFailure { Timber.w(it, "next-word learning failed") }
+        }
     }
 
     private fun cancelZeroQueryLookup() {
@@ -1734,6 +1750,13 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this)
         // 学習: 先頭候補を選んでも覚える・学習した語を1文字目から予測の先頭に出す
         // （設定画面を開いたときに XML の既定値 false/4 が書き込まれていたので上書きする）
+        // 確定した直後に後続語候補（「フローティング」→「ウィンドウ」など）を出す
+        if (!prefs.getBoolean("clear_keyboard_zero_query_v1", false)) {
+            prefs.edit()
+                .putBoolean("zero_query_suggestion_preference", true)
+                .putBoolean("clear_keyboard_zero_query_v1", true)
+                .apply()
+        }
         if (!prefs.getBoolean("clear_keyboard_learn_v1", false)) {
             prefs.edit()
                 .putBoolean("learn_dictionary_preference", true)
@@ -3842,6 +3865,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
     }
 
     override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
+        if (!restarting) lastCommittedForNextWordLearning = null
         floatingCursor?.stop()
         resetCursorInputSession()
         cursorInputTracking = cursorSettings.enabled

@@ -499,7 +499,7 @@
             app:iconSpaceReserved="false" />
 
         <SwitchPreferenceCompat
-            android:defaultValue="false"
+            android:defaultValue="true"
             android:key="zero_query_suggestion_preference"
             android:summaryOff="@string/zero_query_suggestion_summary_off"
             android:summaryOn="@string/zero_query_suggestion_summary_on"
