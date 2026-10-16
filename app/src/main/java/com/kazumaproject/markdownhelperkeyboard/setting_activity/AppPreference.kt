@@ -210,7 +210,7 @@ object AppPreference {
     private val LONG_PRESS_TIMEOUT = Pair(LONG_PRESS_TIMEOUT_KEY, 300)
     private val DELETE_LONG_PRESS_CONVERSION_BEHAVIOR =
         Pair(DELETE_LONG_PRESS_CONVERSION_BEHAVIOR_KEY, "deferred")
-    private val VIBRATION_PREFERENCE = Pair(VIBRATION_KEY, true)
+    private val VIBRATION_PREFERENCE = Pair(VIBRATION_KEY, false)
     private val VIBRATION_TIMING_PREFERENCE = Pair(VIBRATION_TIMING_KEY, "both")
     private val KEY_SOUND_PREFERENCE = Pair(KEY_SOUND_KEY, false)
     private val KEY_SOUND_VOLUME_PERCENT_PREFERENCE =

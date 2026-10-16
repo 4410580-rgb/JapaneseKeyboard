@@ -151,7 +151,7 @@
     <PreferenceCategory android:title="@string/category_vibration_title">
 
         <SwitchPreferenceCompat
-            android:defaultValue="true"
+            android:defaultValue="false"
             android:key="vibration_preference"
             android:summaryOff="@string/vibration_summary_off"
             android:summaryOn="@string/vibration_summary_on"

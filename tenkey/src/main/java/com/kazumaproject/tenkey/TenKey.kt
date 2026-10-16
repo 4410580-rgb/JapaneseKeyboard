@@ -289,15 +289,12 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
             rawY >= loc[1] && rawY < loc[1] + view.height
     }
 
-    private fun cancelTouchForGesture(
-        haptic: Int = android.view.HapticFeedbackConstants.LONG_PRESS,
-    ) {
+    private fun cancelTouchForGesture() {
         val now = android.os.SystemClock.uptimeMillis()
         val cancel = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0f, 0f, 0)
         super.dispatchTouchEvent(cancel)
         cancel.recycle()
         cancelActiveTouch(KeyTouchCancelReason.ActionCancel)
-        performHapticFeedback(haptic)
     }
 
     // ---- ← → の上下フリックで行移動。押し続けると徐々に速くなる（上限あり） ----
@@ -309,7 +306,6 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         override fun run() {
             if (!lineMoving) return
             moveDragListener?.onLineMove(lineMoveUp)
-            lineMoveIntervalMs = (lineMoveIntervalMs * 0.85f).toLong().coerceAtLeast(LINE_MOVE_MIN_MS)
             postDelayed(this, lineMoveIntervalMs)
         }
     }
@@ -317,12 +313,12 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
     private fun startLineMove(up: Boolean) {
         lineMoving = true
         lineMoveUp = up
-        cancelTouchForGesture(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+        cancelTouchForGesture()
         moveDragListener?.onLineMove(up)
         lineMoveIntervalMs = LINE_MOVE_FIRST_REPEAT_MS
         removeCallbacks(lineMoveRepeatRunnable)
-        // 少し押し続けたら連続移動を始める
-        postDelayed(lineMoveRepeatRunnable, LINE_MOVE_HOLD_MS)
+        // ← → の長押しと同じく、長押しの時間が過ぎたら同じ速さで連続移動する
+        postDelayed(lineMoveRepeatRunnable, longPressTimeout)
     }
 
     private fun stopLineMove() {
@@ -443,12 +439,8 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
     }
 
     private companion object LineMoveTiming {
-        /** 1行目のあと、連続移動を始めるまで */
-        const val LINE_MOVE_HOLD_MS = 350L
-        /** 連続移動の最初の間隔 */
-        const val LINE_MOVE_FIRST_REPEAT_MS = 220L
-        /** 最速でも1行ずつ目で追える程度（約12行/秒） */
-        const val LINE_MOVE_MIN_MS = 80L
+        /** 連続移動の間隔。← → の長押し（1文字ずつ）と同じ 64ms */
+        const val LINE_MOVE_FIRST_REPEAT_MS = 64L
     }
 
     private fun clearGridKeys(): List<View> = binding.run {

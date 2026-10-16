@@ -1750,6 +1750,13 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this)
         // 学習: 先頭候補を選んでも覚える・学習した語を1文字目から予測の先頭に出す
         // （設定画面を開いたときに XML の既定値 false/4 が書き込まれていたので上書きする）
+        // 振動はオフ
+        if (!prefs.getBoolean("clear_keyboard_vibration_off_v1", false)) {
+            prefs.edit()
+                .putBoolean("vibration_preference", false)
+                .putBoolean("clear_keyboard_vibration_off_v1", true)
+                .apply()
+        }
         // 確定した直後に後続語候補（「フローティング」→「ウィンドウ」など）を出す
         if (!prefs.getBoolean("clear_keyboard_zero_query_v1", false)) {
             prefs.edit()
