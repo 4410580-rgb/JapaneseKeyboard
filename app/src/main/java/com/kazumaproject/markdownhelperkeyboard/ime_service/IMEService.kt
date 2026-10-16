@@ -1792,6 +1792,17 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         )
     }
 
+    /** ← を右に / → を左にはじいたとき: タップと同じ1文字移動を反対向きに。変換中は何もしない。 */
+    private fun moveCursorOneChar(right: Boolean) {
+        if (isHenkan.get()) return
+        val insertString = inputString.value
+        if (right) {
+            actionInRightKeyPressed(GestureType.Tap, insertString)
+        } else {
+            handleLeftCursor(GestureType.Tap, insertString)
+        }
+    }
+
     private fun isClearKeyboardAllowed(): Boolean {
         return isInputViewActive &&
             !isFullscreenMode &&
@@ -11534,6 +11545,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                 override fun onMove(dyPx: Float) = clearKeyboard.moveBy(dyPx)
                 override fun onMoveEnd() = clearKeyboard.saveLift()
                 override fun onLineMove(up: Boolean) = moveCursorOneLine(up)
+                override fun onCharMove(right: Boolean) = moveCursorOneChar(right)
             })
             applyKeyboardTheme(
                 skinId = keyboardSkinId,

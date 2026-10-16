@@ -267,6 +267,8 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         fun onMoveEnd()
         /** ← → を上下にはじいたとき: 1行上/下へ */
         fun onLineMove(up: Boolean)
+        /** ← を右に / → を左にはじいたとき: 反対向きに1文字 */
+        fun onCharMove(right: Boolean)
     }
 
     private var moveDragListener: MoveDragListener? = null
@@ -299,22 +301,32 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
 
     // ---- ← → の上下フリックで行移動。押し続けると徐々に速くなる（上限あり） ----
     private var lineMoveCandidate = false
+    private var lineMoveOnLeftKey = false
     private var lineMoving = false
     private var lineMoveUp = false
+    /** null: 上下（行移動）、true/false: 左右（文字移動、true=右） */
+    private var charMoveRight: Boolean? = null
+
+    private fun emitCursorFlickMove() {
+        val right = charMoveRight
+        if (right == null) moveDragListener?.onLineMove(lineMoveUp)
+        else moveDragListener?.onCharMove(right)
+    }
     private var lineMoveIntervalMs = LINE_MOVE_FIRST_REPEAT_MS
     private val lineMoveRepeatRunnable = object : Runnable {
         override fun run() {
             if (!lineMoving) return
-            moveDragListener?.onLineMove(lineMoveUp)
+            emitCursorFlickMove()
             postDelayed(this, lineMoveIntervalMs)
         }
     }
 
-    private fun startLineMove(up: Boolean) {
+    private fun startLineMove(up: Boolean, charRight: Boolean? = null) {
         lineMoving = true
         lineMoveUp = up
+        charMoveRight = charRight
         cancelTouchForGesture()
-        moveDragListener?.onLineMove(up)
+        emitCursorFlickMove()
         lineMoveIntervalMs = LINE_MOVE_FIRST_REPEAT_MS
         removeCallbacks(lineMoveRepeatRunnable)
         // ← → の長押しと同じく、長押しの時間が過ぎたら同じ速さで連続移動する
@@ -355,7 +367,8 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 stopLineMove()
-                lineMoveCandidate = isOnView(binding.keySoftLeft, ev.rawX, ev.rawY) ||
+                lineMoveOnLeftKey = isOnView(binding.keySoftLeft, ev.rawX, ev.rawY)
+                lineMoveCandidate = lineMoveOnLeftKey ||
                     isOnView(binding.keyMoveCursorRight, ev.rawX, ev.rawY)
                 moveDragging = false
                 moveGestureIsDrag = false
@@ -379,9 +392,11 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
             MotionEvent.ACTION_MOVE -> {
                 if (lineMoving) {
                     // 指を反対側へ動かしたら向きを変える
-                    val dy = ev.rawY - moveDownRawY
-                    if (kotlin.math.abs(dy) > flickThresholdPx && (dy < 0) != lineMoveUp) {
-                        lineMoveUp = dy < 0
+                    if (charMoveRight == null) {
+                        val dy = ev.rawY - moveDownRawY
+                        if (kotlin.math.abs(dy) > flickThresholdPx && (dy < 0) != lineMoveUp) {
+                            lineMoveUp = dy < 0
+                        }
                     }
                     return true
                 }
@@ -392,6 +407,14 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
                         removeCallbacks(moveStartRunnable)
                         removeCallbacks(toggleFloatingRunnable)
                         startLineMove(up = dy < 0)
+                        return true
+                    }
+                    // ← を右に、→ を左にはじいたら反対向きに1文字（押し続けると連続）
+                    val opposite = if (lineMoveOnLeftKey) dx > 0 else dx < 0
+                    if (opposite && kotlin.math.abs(dx) > flickThresholdPx && kotlin.math.abs(dx) > kotlin.math.abs(dy)) {
+                        removeCallbacks(moveStartRunnable)
+                        removeCallbacks(toggleFloatingRunnable)
+                        startLineMove(up = false, charRight = dx > 0)
                         return true
                     }
                 }
