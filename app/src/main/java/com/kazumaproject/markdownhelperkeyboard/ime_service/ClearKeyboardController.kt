@@ -43,7 +43,10 @@ class ClearKeyboardController(
         val maxLift = (c.resources.displayMetrics.heightPixels - root.height -
             48 * c.resources.displayMetrics.density).coerceAtLeast(0f)
         liftPx = (liftPx - dyPx).coerceIn(0f, maxLift)
-        applyLift(true)
+        // 掴んでいる間は指に合わせて動かす（下まで下ろしたかどうかは離した後に判定）
+        dragging = true
+        val bottom = liftPx.toInt()
+        if (c.paddingBottom != bottom) c.setPadding(0, 0, 0, bottom)
     }
 
     private var floatingOn: Boolean? = null
@@ -63,7 +66,7 @@ class ClearKeyboardController(
         val next = !isFloatingOn(c.context)
         floatingOn = next
         if (liftPx < 0f) liftPx = prefs(c.context).getFloat(PREF_LIFT, 0f)
-        if (next && liftPx < 1f) {
+        if (next && liftPx < 24 * c.resources.displayMetrics.density) {
             // 初めて浮かせるときは画面の 1/3 くらいの高さに出す
             liftPx = c.resources.displayMetrics.heightPixels / 3f
         }
@@ -77,9 +80,15 @@ class ClearKeyboardController(
         c.post { c.requestLayout() }
     }
 
+    private var dragging = false
+
     fun saveLift() {
+        dragging = false
         val c = container ?: return
         prefs(c.context).edit().putFloat(PREF_LIFT, liftPx.coerceAtLeast(0f)).apply()
+        lastFloatingActive = null
+        applyLift(isFloatingActive())
+        c.post { c.requestLayout() }
     }
 
     private fun applyLift(active: Boolean) {
@@ -126,7 +135,10 @@ class ClearKeyboardController(
     fun isFloatingActive(): Boolean {
         val c = container ?: return false
         val view = mainView ?: return false
-        return isAllowed() && isFloatingOn(c.context) && view.root.isShown
+        if (liftPx < 0f) liftPx = prefs(c.context).getFloat(PREF_LIFT, 0f)
+        // 一番下まで下ろしたら、浮かせていても普通のキーボードと同じ扱いにする
+        val dockSnap = 24 * c.resources.displayMetrics.density
+        return isAllowed() && isFloatingOn(c.context) && liftPx >= dockSnap && view.root.isShown
     }
 
     private var lastFloatingActive: Boolean? = null
@@ -136,13 +148,15 @@ class ClearKeyboardController(
      * 画面下に固定しているときは普通のキーボードと同じくアプリを押し上げる。
      */
     fun computeInsets(outInsets: Insets, windowHeight: Int): Boolean {
-        if (!isFloatingActive()) return false
         val root = mainView?.root ?: return false
+        if (!isAllowed() || !root.isShown) return false
         if (windowHeight <= 0 || root.height == 0) return false
         val loc = IntArray(2)
         root.getLocationInWindow(loc)
-        outInsets.contentTopInsets = windowHeight
-        outInsets.visibleTopInsets = windowHeight
+        // 浮かせているときはアプリを縮めない。画面下のときはキーボードの上端までアプリを押し上げる。
+        val top = if (isFloatingActive()) windowHeight else loc[1]
+        outInsets.contentTopInsets = top
+        outInsets.visibleTopInsets = top
         outInsets.touchableInsets = Insets.TOUCHABLE_INSETS_REGION
         outInsets.touchableRegion.set(
             Region(loc[0], loc[1], loc[0] + root.width, loc[1] + root.height)
@@ -161,7 +175,7 @@ class ClearKeyboardController(
             container?.post { container?.requestLayout() }
         }
         val floating = isFloatingActive()
-        if (floating != lastFloatingActive) {
+        if (!dragging && floating != lastFloatingActive) {
             lastFloatingActive = floating
             applyLift(floating)
             container?.post { container?.requestLayout() }

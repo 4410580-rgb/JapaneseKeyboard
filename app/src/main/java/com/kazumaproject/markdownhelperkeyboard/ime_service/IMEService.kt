@@ -25942,7 +25942,21 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                 commitAndClearInput(readingCorrection.first)
             }
 
-            9,
+            9 -> {
+                // 予測候補も学習する（元は学習せずに確定していたので、選んでも先頭に上がらなかった）
+                val reading = candidate.yomi?.takeIf { it.isNotEmpty() } ?: insertString
+                recordCandidateLearning(
+                    currentInputMode = currentInputMode,
+                    originalReading = reading,
+                    segmentReading = reading,
+                    output = candidate.string,
+                    candidate = candidate,
+                    candidateIndex = position,
+                    complete = stringInTail.get().isEmpty(),
+                )
+                commitAndClearInput(candidate.string)
+            }
+
             11,
             12,
             13,
