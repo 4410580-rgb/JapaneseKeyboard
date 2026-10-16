@@ -645,7 +645,7 @@ object AppPreference {
             TfbiFlickStartPositionMode.TOUCH_POINT.preferenceValue
         )
 
-    private val CANDIDATE_LETTER_SIZE = Pair("candidate_letter_size_preference", 20.0f)
+    private val CANDIDATE_LETTER_SIZE = Pair("candidate_letter_size_preference", 17.0f)
 
     private val CANDIDATE_VIEW_HEIGHT_DP = Pair("candidate_view_height_dp_preference", 44)
     private val CANDIDATE_VIEW_EMPTY_HEIGHT_DP =
@@ -804,15 +804,15 @@ object AppPreference {
         Pair("conversion_candidates_romaji_enable_preference", false)
 
     private val LEARN_FIRST_CANDIDATE_DICTIONARY_PREFERENCE =
-        Pair("learn_first_candidate_dictionary_preference", false)
+        Pair("learn_first_candidate_dictionary_preference", true)
 
     private val LEARN_DICTIONARY_ALLOW_MIXED_SYMBOLS_NUMBERS_PREFERENCE =
         Pair("learn_dictionary_allow_mixed_symbols_numbers_preference", true)
 
     private val ENABLE_PREDICTION_SEARCH_LEARN_DICTIONARY_PREFERENCE =
-        Pair("enable_prediction_search_learn_dictionary_preference", false)
+        Pair("enable_prediction_search_learn_dictionary_preference", true)
 
-    private val LEARN_PREDICTION_PREFERENCE = Pair("learn_prediction_preference", 4)
+    private val LEARN_PREDICTION_PREFERENCE = Pair("learn_prediction_preference", 1)
     private val LEARN_PREDICTION_CANDIDATE_LIMIT_PREFERENCE =
         Pair("learn_dictionary_prediction_candidate_limit_preference", 4)
     private val USER_DICTIONARY_PREDICTION_CANDIDATE_LIMIT_PREFERENCE =

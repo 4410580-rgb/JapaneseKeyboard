@@ -12,6 +12,7 @@ import android.graphics.drawable.Drawable
  */
 class ClearKeyDrawable(
     private val pressedColor: Int = 0x40FFFFFF,
+    private val onPressedChanged: (() -> Unit)? = null,
 ) : Drawable() {
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pressedColor }
@@ -33,6 +34,7 @@ class ClearKeyDrawable(
         if (nowPressed == pressed) return false
         pressed = nowPressed
         invalidateSelf()
+        onPressedChanged?.invoke()
         return true
     }
 
@@ -50,10 +52,13 @@ class ClearKeyDrawable(
     @Deprecated("Deprecated in Java")
     override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 
-    override fun getConstantState(): ConstantState = State(pressedColor)
+    override fun getConstantState(): ConstantState = State(pressedColor, onPressedChanged)
 
-    private class State(private val pressedColor: Int) : ConstantState() {
-        override fun newDrawable(): Drawable = ClearKeyDrawable(pressedColor)
+    private class State(
+        private val pressedColor: Int,
+        private val onPressedChanged: (() -> Unit)?,
+    ) : ConstantState() {
+        override fun newDrawable(): Drawable = ClearKeyDrawable(pressedColor, onPressedChanged)
         override fun getChangingConfigurations(): Int = 0
     }
 }

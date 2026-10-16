@@ -30,6 +30,34 @@ class ClearKeyboardController(
         true
     }
 
+    // 長押しで持ち上げた高さ（px）。透過中だけ効く。
+    private var liftPx = -1f
+
+    private fun prefs(ctx: android.content.Context) =
+        androidx.preference.PreferenceManager.getDefaultSharedPreferences(ctx)
+
+    fun moveBy(dyPx: Float) {
+        val c = container ?: return
+        val root = mainView?.root ?: return
+        if (liftPx < 0f) liftPx = prefs(c.context).getFloat(PREF_LIFT, 0f)
+        val maxLift = (c.resources.displayMetrics.heightPixels - root.height -
+            48 * c.resources.displayMetrics.density).coerceAtLeast(0f)
+        liftPx = (liftPx - dyPx).coerceIn(0f, maxLift)
+        applyLift(true)
+    }
+
+    fun saveLift() {
+        val c = container ?: return
+        prefs(c.context).edit().putFloat(PREF_LIFT, liftPx.coerceAtLeast(0f)).apply()
+    }
+
+    private fun applyLift(active: Boolean) {
+        val c = container ?: return
+        if (liftPx < 0f) liftPx = prefs(c.context).getFloat(PREF_LIFT, 0f)
+        val bottom = if (active) liftPx.toInt() else 0
+        if (c.paddingBottom != bottom) c.setPadding(0, 0, 0, bottom)
+    }
+
     fun attach(container: FrameLayout, mainView: MainLayoutBinding) {
         detach()
         this.container = container
@@ -39,6 +67,7 @@ class ClearKeyboardController(
     }
 
     fun detach() {
+        container?.setPadding(0, 0, 0, 0)
         mainView?.root?.let { root ->
             if (root.viewTreeObserver.isAlive) {
                 root.viewTreeObserver.removeOnPreDrawListener(preDrawListener)
@@ -80,6 +109,7 @@ class ClearKeyboardController(
         if (active != lastActive) {
             lastActive = active
             if (!active) chrome.restore(view.root, view.suggestionViewParent, view.candidateTabLayout)
+            applyLift(active)
             onActiveChanged(active, view)
             // insets を取り直してもらう
             container?.post { container?.requestLayout() }
@@ -93,6 +123,8 @@ class ClearKeyboardController(
         }
     }
 }
+
+private const val PREF_LIFT = "clear_keyboard_lift_px"
 
 /** フローティング表示のときも、日本語テンキー中は格子だけにする。 */
 class FloatingClearChrome(

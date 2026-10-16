@@ -256,6 +256,91 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         onClearGridChanged?.invoke(want)
     }
 
+    // ---- 透過モード: 長押しでキーボードを上下に動かす（⌫ だけは連続削除を優先） ----
+    interface MoveDragListener {
+        fun onMoveStart()
+        fun onMove(dyPx: Float)
+        fun onMoveEnd()
+    }
+
+    private var moveDragListener: MoveDragListener? = null
+    private var moveDragging = false
+    private var moveDownRawX = 0f
+    private var moveDownRawY = 0f
+    private var moveLastRawY = 0f
+    private val moveStartRunnable = Runnable { startMoveDrag() }
+
+    fun setMoveDragListener(listener: MoveDragListener?) {
+        moveDragListener = listener
+    }
+
+    private fun isOnDeleteKey(rawX: Float, rawY: Float): Boolean {
+        val loc = IntArray(2)
+        binding.keyDelete.getLocationOnScreen(loc)
+        return rawX >= loc[0] && rawX < loc[0] + binding.keyDelete.width &&
+            rawY >= loc[1] && rawY < loc[1] + binding.keyDelete.height
+    }
+
+    private fun startMoveDrag() {
+        if (!clearGridApplied || moveDragListener == null) return
+        moveDragging = true
+        moveLastRawY = moveDownRawY
+        // キー入力としてはキャンセル扱いにする
+        val now = android.os.SystemClock.uptimeMillis()
+        val cancel = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0f, 0f, 0)
+        super.dispatchTouchEvent(cancel)
+        cancel.recycle()
+        cancelActiveTouch(KeyTouchCancelReason.ActionCancel)
+        performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        moveDragListener?.onMoveStart()
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (!clearGridApplied || moveDragListener == null) return super.dispatchTouchEvent(ev)
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                moveDragging = false
+                moveDownRawX = ev.rawX
+                moveDownRawY = ev.rawY
+                removeCallbacks(moveStartRunnable)
+                if (!isOnDeleteKey(ev.rawX, ev.rawY)) {
+                    postDelayed(moveStartRunnable, (longPressTimeout * 8 / 10).coerceAtLeast(250L))
+                }
+            }
+
+            MotionEvent.ACTION_MOVE -> {
+                if (moveDragging) {
+                    moveDragListener?.onMove(ev.rawY - moveLastRawY)
+                    moveLastRawY = ev.rawY
+                    return true
+                }
+                val slop = ViewConfiguration.get(context).scaledTouchSlop
+                if (kotlin.math.abs(ev.rawX - moveDownRawX) > slop ||
+                    kotlin.math.abs(ev.rawY - moveDownRawY) > slop
+                ) {
+                    removeCallbacks(moveStartRunnable)
+                }
+            }
+
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                if (moveDragging) return true
+                removeCallbacks(moveStartRunnable)
+            }
+
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                removeCallbacks(moveStartRunnable)
+                if (moveDragging) {
+                    moveDragging = false
+                    moveDragListener?.onMoveEnd()
+                    return true
+                }
+            }
+
+            else -> if (moveDragging) return true
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
     private fun clearGridKeys(): List<View> = binding.run {
         listOf(
             key1, key2, key3, key4, key5, key6, key7, key8, key9,
@@ -267,27 +352,25 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
 
     private fun applyClearGridVisuals() {
         setBackgroundColor(Color.TRANSPARENT)
+        // 配置は覚えているので、キー自体は描かずに格子と押下の光だけを TenKey 側で描く。
+        // 文字色はあちこちで戻されるので、キーごと透明（alpha 0）にしておく。
         clearGridKeys().forEach { view ->
             if (view.background !is com.kazumaproject.tenkey.view.ClearKeyDrawable) {
-                view.background = com.kazumaproject.tenkey.view.ClearKeyDrawable()
+                view.background = com.kazumaproject.tenkey.view.ClearKeyDrawable(
+                    onPressedChanged = clearPressInvalidator
+                )
             }
-            // 配置は覚えているので文字・アイコンは出さず、格子だけにする
-            when (view) {
-                is AppCompatButton -> {
-                    view.setTextColor(Color.TRANSPARENT)
-                    view.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
-                }
-
-                is AppCompatImageButton -> view.imageAlpha = 0
-            }
+            view.alpha = 0f
         }
         binding.sideKeySymbolModeContainer.setKeyBackground(
-            com.kazumaproject.tenkey.view.ClearKeyDrawable()
+            com.kazumaproject.tenkey.view.ClearKeyDrawable(onPressedChanged = clearPressInvalidator)
         )
-        binding.sideKeySymbolModeContainer.setKeyTint(
-            ColorStateList.valueOf(Color.TRANSPARENT)
-        )
+        binding.sideKeySymbolModeContainer.alpha = 0f
+        invalidate()
     }
+
+    private val clearPressInvalidator: () -> Unit = { invalidate() }
+    private val clearPressedPaint = android.graphics.Paint().apply { color = 0x40FFFFFF }
 
     private var lastPreviousKeyDrawable: Drawable? = null
     private var lastPreviousKeyEnabled: Boolean = true
@@ -316,10 +399,8 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
     }
 
     private fun clearKeyLabelShadows() {
-        clearGridKeys().forEach { view ->
-            (view as? AppCompatButton)?.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
-            (view as? AppCompatImageButton)?.imageAlpha = 255
-        }
+        clearGridKeys().forEach { view -> view.alpha = 1f }
+        binding.sideKeySymbolModeContainer.alpha = 1f
     }
 
     override fun dispatchDraw(canvas: android.graphics.Canvas) {
@@ -330,11 +411,18 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         val views = scalableKeyViews().filter { it.visibility == View.VISIBLE }
         val edgeSlop = 2f * resources.displayMetrics.density
         views.forEach { v ->
+            if (v.alpha != 0f) v.alpha = 0f
             val lp = v.layoutParams as? LayoutParams
             val right = v.right + (lp?.marginEnd ?: 0).toFloat()
             val bottom = v.bottom + (lp?.bottomMargin ?: 0).toFloat()
             val top = v.top - (lp?.topMargin ?: 0).toFloat()
             val left = v.left - (lp?.marginStart ?: 0).toFloat()
+            val pressed = if (v is com.kazumaproject.tenkey.view.SideKeySymbolModeContainerView) {
+                v.isAnyKeyPressed
+            } else {
+                v.isPressed
+            }
+            if (pressed) canvas.drawRect(left, top, right, bottom, clearPressedPaint)
             // 右端・下端以外の境目にだけ線を引く（外枠は描かない）
             if (right < width - edgeSlop) {
                 canvas.drawRect(right - half, top, right + half, bottom, clearGridPaint)

@@ -182,6 +182,9 @@ class SideKeySymbolModeContainerView @JvmOverloads constructor(
         symbolButton.isPressed = key == Key.SideKeySymbol
     }
 
+    val isAnyKeyPressed: Boolean
+        get() = numberButton.isPressed || symbolButton.isPressed
+
     fun clearPressedKey() {
         isPressed = false
         numberButton.isPressed = false

@@ -4301,7 +4301,8 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
             savedSingleFloatingMode = preferences.isKeyboardFloatingMode
             isKeyboardFloatingMode = true
         } else {
-            isKeyboardFloatingMode = preferences.isKeyboardFloatingMode
+            // 透過キーボードでは、スミレのフローティングの代わりに長押しで上下に動かす
+            isKeyboardFloatingMode = false
         }
         isKeyboardRounded = preferences.isKeyboardRounded
         keyboardCornerRadiusDp = preferences.keyboardCornerRadiusDp.coerceIn(0, 64)
@@ -4315,7 +4316,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         conversionKeySwipePreference = preferences.conversionKeySwipePreference
         physicalKeyboardInputMode =
             PhysicalKeyboardInputMode.fromPreferenceValue(preferences.physicalKeyboardInputMode)
-        _keyboardFloatingMode.update { preferences.isKeyboardFloatingMode }
+        _keyboardFloatingMode.update { false }
         switchQWERTYPassword = preferences.switchQWERTYPassword
         landscapeForceQwertyPreference = preferences.landscapeForceQwertyPreference
         landscapeForceQwertyRomajiPreference = preferences.landscapeForceQwertyRomajiPreference
@@ -11455,6 +11456,11 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
             }
             setOnFlickTextPreviewListener(tenKeyFlickTextPreviewListener)
             setClearGridRequested(true)
+            setMoveDragListener(object : com.kazumaproject.tenkey.TenKey.MoveDragListener {
+                override fun onMoveStart() {}
+                override fun onMove(dyPx: Float) = clearKeyboard.moveBy(dyPx)
+                override fun onMoveEnd() = clearKeyboard.saveLift()
+            })
             applyKeyboardTheme(
                 skinId = keyboardSkinId,
                 themeMode = keyboardThemeMode ?: "default",
@@ -12221,20 +12227,8 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         char?.let {
             if (dispatchDirectTextIfNeeded(it.toString())) return
         }
-        if (isHenkan.get()) {
-            commitCurrentHenkanForNewInput()
-            char?.let {
-                sendCharTap(
-                    charToSend = it, insertString = "", sb = sb
-                )
-            }
-        } else {
-            char?.let {
-                sendCharTap(
-                    charToSend = it, insertString = insertString, sb = sb
-                )
-            }
-        }
+        // フリック入力だけ使うので、連続タップでの文字送り（あ→い→う）はしない
+        handleFlick(char, insertString, sb, _mainView)
     }
 
     private fun Char.toRomajiQwertyOutputChar(): Char {
@@ -12333,8 +12327,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                 handleSpaceLongAction()
             }
 
-            // 記号キーの長押しでフローティング表示を切り替える
-            Key.SideKeySymbol -> toggleKeyboardFloatingModeFromShortcut()
+            Key.SideKeySymbol -> {}
             else -> {}
         }
     }
@@ -12384,8 +12377,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                 handleSpaceLongActionFloating()
             }
 
-            // 記号キーの長押しでフローティング表示を切り替える
-            Key.SideKeySymbol -> toggleKeyboardFloatingModeFromShortcut()
+            Key.SideKeySymbol -> {}
             else -> {}
         }
     }
