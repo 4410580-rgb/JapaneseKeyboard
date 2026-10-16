@@ -1716,6 +1716,32 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
     private var selectionActionSession: SelectionActionSession? = null
 
     private var mainLayoutBinding: MainLayoutBinding? = null
+
+    // 透過キーボード（日本語テンキーを格子だけで描き、アプリを縮めない）
+    private val clearKeyboard = ClearKeyboardController(
+        isAllowed = { isClearKeyboardAllowed() },
+        onActiveChanged = { active, mainView -> onClearKeyboardActiveChanged(active, mainView) },
+    )
+
+    private fun isClearKeyboardAllowed(): Boolean {
+        return isInputViewActive &&
+            !isFullscreenMode &&
+            isKeyboardFloatingMode != true &&
+            physicalKeyboardEnable.replayCache.firstOrNull() != true &&
+            !isKeyboardLayoutEditModeActive()
+    }
+
+    private fun onClearKeyboardActiveChanged(active: Boolean, mainView: MainLayoutBinding) {
+        if (!active) {
+            applyNormalKeyboardChrome(mainView)
+        }
+        candidateSurfaceHost?.setPanelBackgroundAlpha(candidatePanelBackgroundAlpha())
+        updateCandidateStripPresentation(mainView)
+        if (active) clearKeyboard.updatePreview(currentInputConnection)
+    }
+
+    private fun candidatePanelBackgroundAlpha(): Int =
+        if (liquidGlassThemePreference == true || clearKeyboard.isActive()) 0 else 255
     private var lastKeyboardLayoutRootView: View? = null
     private var lastKeyboardLayoutOrientation: Int? = null
     private var gemmaMediaPanelController: GemmaImeMediaPanelController? = null
@@ -3292,7 +3318,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                 binding.shortcutToolbarRecyclerview, binding.candidateTabLayout,
                 binding.suggestionViewParent, binding.suggestionRecyclerView, binding.candidatesRowView,
             ).also {
-                it.setPanelBackgroundAlpha(if (liquidGlassThemePreference == true) 0 else 255)
+                it.setPanelBackgroundAlpha(candidatePanelBackgroundAlpha())
                 it.setKeyboardFont(KeyboardFontApplicator.processSnapshot)
                 it.attach(target)
             }
@@ -6927,6 +6953,11 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
 
     override fun onComputeInsets(outInsets: Insets?) {
         super.onComputeInsets(outInsets)
+        if (outInsets != null &&
+            clearKeyboard.computeInsets(outInsets, window.window?.decorView?.height ?: 0)
+        ) {
+            return
+        }
         if ((physicalKeyboardEnable.replayCache.isNotEmpty() && physicalKeyboardEnable.replayCache.first()) || isKeyboardFloatingMode == true) {
             val inputHeight = window.window?.decorView?.height ?: 0
             outInsets?.contentTopInsets = inputHeight
@@ -6992,9 +7023,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         mainView: MainLayoutBinding,
         decision: ImeGlassRenderDecision = currentImeGlassRenderDecision(),
     ) {
-        candidateSurfaceHost?.setPanelBackgroundAlpha(
-            if (liquidGlassThemePreference == true) 0 else 255,
-        )
+        candidateSurfaceHost?.setPanelBackgroundAlpha(candidatePanelBackgroundAlpha())
         if (liquidGlassThemePreference != true) return
 
         val rootAlpha = when (decision.mode) {
@@ -8183,6 +8212,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
             container.removeAllViews()
             mainLayoutBinding?.root?.let { newRootView ->
                 container.addView(newRootView)
+                mainLayoutBinding?.let { clearKeyboard.attach(container, it) }
                 gemmaMediaPanelController?.attachTo(container)
                 mainLayoutBinding?.let { mainView ->
                     when (keyboardThemeMode) {
@@ -8345,6 +8375,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         super.onUpdateSelection(
             oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd
         )
+        clearKeyboard.updatePreview(currentInputConnection)
         if (oldSelStart != newSelStart || oldSelEnd != newSelEnd) {
             horizontalCursorSelectionRevision.incrementAndGet()
         }
@@ -11416,6 +11447,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                 rebindMainKeyboardInputListeners(mainView)
             }
             setOnFlickTextPreviewListener(tenKeyFlickTextPreviewListener)
+            setClearGridRequested(true)
             applyKeyboardTheme(
                 skinId = keyboardSkinId,
                 themeMode = keyboardThemeMode ?: "default",
@@ -23522,7 +23554,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                 candidateTabVisible = candidateTabVisibility == true,
                 candidatesShown = candidatesShown && !suppressSuggestions,
                 resetCandidateTabSelection = resetCandidateTabSelection,
-                shortcutToolbarVisible = shortcutTollbarVisibility == true,
+                shortcutToolbarVisible = shortcutTollbarVisibility == true && !clearKeyboard.isActive(),
                 shortcutToolbarIntegratedInSuggestion = shortcutToolbarIntegratedInSuggestion == true,
                 inputStringEmpty = inputString.value.isEmpty(),
                 tailEmpty = stringInTail.get().isEmpty(),
@@ -23570,7 +23602,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
             mainView.shortcutToolbarRecyclerview.isVisible = false
         }
         candidateSurfaceHost?.let { host ->
-            host.setPanelBackgroundAlpha(if (liquidGlassThemePreference == true) 0 else 255)
+            host.setPanelBackgroundAlpha(candidatePanelBackgroundAlpha())
             host.refreshAppearance()
         }
     }

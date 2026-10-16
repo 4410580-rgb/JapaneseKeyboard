@@ -214,6 +214,106 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
     private val _currentInputMode = MutableStateFlow<InputMode>(InputMode.ModeJapanese)
     val currentInputMode: StateFlow<InputMode> = _currentInputMode
 
+    // ---- 透過（格子だけ）モード ----
+    private var clearGridRequested = false
+    private var clearGridApplied = false
+    private var lastThemeApply: (() -> Unit)? = null
+    private var onClearGridChanged: ((Boolean) -> Unit)? = null
+    private val clearGridPaint = android.graphics.Paint().apply {
+        color = 0x66FFFFFF
+        style = android.graphics.Paint.Style.FILL
+    }
+
+    /** 日本語テンキーを「格子だけ」で描くかどうか。実際に効くのは日本語入力中だけ。 */
+    fun setClearGridRequested(enabled: Boolean) {
+        clearGridRequested = enabled
+        refreshClearGrid()
+    }
+
+    val isClearGridApplied: Boolean
+        get() = clearGridApplied
+
+    fun setOnClearGridChangedListener(listener: ((Boolean) -> Unit)?) {
+        onClearGridChanged = listener
+    }
+
+    private fun refreshClearGrid() {
+        val want = clearGridRequested && currentInputMode.value == InputMode.ModeJapanese
+        if (want) {
+            applyClearGridVisuals()
+        }
+        if (want == clearGridApplied) return
+        clearGridApplied = want
+        if (!want) {
+            clearKeyLabelShadows()
+            lastThemeApply?.invoke()
+        }
+        invalidate()
+        onClearGridChanged?.invoke(want)
+    }
+
+    private fun clearGridKeys(): List<View> = binding.run {
+        listOf(
+            key1, key2, key3, key4, key5, key6, key7, key8, key9,
+            keySmallLetter, key11, key12,
+            keyReturn, keySoftLeft, keyDelete, keyMoveCursorRight,
+            keySpace, keyEnter, keySwitchKeyMode
+        )
+    }
+
+    private fun applyClearGridVisuals() {
+        val density = resources.displayMetrics.density
+        val white = Color.WHITE
+        val whiteTint = ColorStateList.valueOf(white)
+        setBackgroundColor(Color.TRANSPARENT)
+        clearGridKeys().forEach { view ->
+            if (view.background !is com.kazumaproject.tenkey.view.ClearKeyDrawable) {
+                view.background = com.kazumaproject.tenkey.view.ClearKeyDrawable()
+            }
+            when (view) {
+                is AppCompatButton -> {
+                    view.setTextColor(white)
+                    view.setShadowLayer(3f * density, 0f, 0f, 0xE6000000.toInt())
+                }
+
+                is AppCompatImageButton -> ImageViewCompat.setImageTintList(view, whiteTint)
+            }
+        }
+        binding.sideKeySymbolModeContainer.setKeyBackground(
+            com.kazumaproject.tenkey.view.ClearKeyDrawable()
+        )
+        binding.sideKeySymbolModeContainer.setKeyTint(whiteTint)
+    }
+
+    private fun clearKeyLabelShadows() {
+        clearGridKeys().forEach { view ->
+            (view as? AppCompatButton)?.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
+        }
+    }
+
+    override fun dispatchDraw(canvas: android.graphics.Canvas) {
+        super.dispatchDraw(canvas)
+        if (!clearGridApplied) return
+        val line = resources.displayMetrics.density.coerceAtLeast(1f)
+        val half = line / 2f
+        val views = scalableKeyViews().filter { it.visibility == View.VISIBLE }
+        val edgeSlop = 2f * resources.displayMetrics.density
+        views.forEach { v ->
+            val lp = v.layoutParams as? LayoutParams
+            val right = v.right + (lp?.marginEnd ?: 0).toFloat()
+            val bottom = v.bottom + (lp?.bottomMargin ?: 0).toFloat()
+            val top = v.top - (lp?.topMargin ?: 0).toFloat()
+            val left = v.left - (lp?.marginStart ?: 0).toFloat()
+            // 右端・下端以外の境目にだけ線を引く（外枠は描かない）
+            if (right < width - edgeSlop) {
+                canvas.drawRect(right - half, top, right + half, bottom, clearGridPaint)
+            }
+            if (bottom < height - edgeSlop) {
+                canvas.drawRect(left, bottom - half, right, bottom + half, clearGridPaint)
+            }
+        }
+    }
+
     // Popups: active (center) and directional
     private lateinit var popupWindowActive: PopupWindow
     private lateinit var bubbleViewActive: KeyWindowLayout
@@ -450,6 +550,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
                     useThreeStateKeyboard = useThreeStateKeyboard,
                     twoStateNumberReturnTarget = twoStateNumberReturnTarget
                 )
+                refreshClearGrid()
             }
         }
     }
@@ -1086,6 +1187,14 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         borderWidth: Int,
         skinId: KeyboardSkinId = KeyboardSkinId.DEFAULT
     ) {
+        lastThemeApply = {
+            applyKeyboardTheme(
+                themeMode, currentNightMode, isDynamicColorEnabled, customBgColor,
+                customKeyColor, customSpecialKeyColor, customKeyTextColor,
+                customSpecialKeyTextColor, liquidGlassEnable, customBorderEnable,
+                customBorderColor, liquidGlassKeyAlphaEnable, borderWidth, skinId
+            )
+        }
         // Dismiss held labels before restoring colors, so their cleanup cannot restore skin colors.
         if (this.keyboardSkinId != skinId && ::popupWindowActive.isInitialized) { hideAllPopWindow() }
         if (pointerPopups.isNotEmpty()) cancelActiveTouch(KeyTouchCancelReason.PointerInterrupted)
@@ -1154,6 +1263,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
             selectedColor = modeLabelColor,
             idleColor = modeLabelColor?.let { ColorUtils.setAlphaComponent(it, 150) },
         )
+        if (clearGridApplied) applyClearGridVisuals()
     }
 
     /**
