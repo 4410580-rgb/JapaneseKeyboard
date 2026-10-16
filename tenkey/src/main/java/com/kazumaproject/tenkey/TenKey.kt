@@ -239,13 +239,17 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
 
     private fun refreshClearGrid() {
         val want = clearGridRequested && currentInputMode.value == InputMode.ModeJapanese
+        if (want == clearGridApplied) {
+            if (want) applyClearGridVisuals()
+            return
+        }
+        clearGridApplied = want
         if (want) {
             applyClearGridVisuals()
-        }
-        if (want == clearGridApplied) return
-        clearGridApplied = want
-        if (!want) {
+            if (!isCursorMode) applySimejiSideKeys()
+        } else {
             clearKeyLabelShadows()
+            restoreSideKeys()
             lastThemeApply?.invoke()
         }
         invalidate()
@@ -283,6 +287,32 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
             com.kazumaproject.tenkey.view.ClearKeyDrawable()
         )
         binding.sideKeySymbolModeContainer.setKeyTint(whiteTint)
+    }
+
+    private var lastPreviousKeyDrawable: Drawable? = null
+    private var lastPreviousKeyEnabled: Boolean = true
+
+    /** Simeji と同じ左列: 記号 / ← / 123 / あA */
+    private fun applySimejiSideKeys() {
+        binding.keyReturn.isEnabled = true
+        KeyboardFontGlyphDrawable.setImageDrawable(
+            binding.keyReturn, cachedSymbolDrawable, keyboardFontSnapshot
+        )
+        binding.sideKeySymbolModeContainer.setSymbolImageDrawable(
+            KeyboardFontGlyphDrawable.create(
+                context,
+                com.kazumaproject.core.R.drawable.input_mode_number_select_custom,
+                keyboardFontSnapshot,
+            )
+        )
+    }
+
+    private fun restoreSideKeys() {
+        binding.keyReturn.isEnabled = lastPreviousKeyEnabled
+        KeyboardFontGlyphDrawable.setImageDrawable(
+            binding.keyReturn, lastPreviousKeyDrawable ?: cachedUndoDrawable, keyboardFontSnapshot
+        )
+        binding.sideKeySymbolModeContainer.setSymbolImageDrawable(cachedSymbolDrawable)
     }
 
     private fun clearKeyLabelShadows() {
@@ -2152,7 +2182,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
 
         val keyRects = listOf(
             KeyRect(
-                Key.SideKeyPreviousChar,
+                if (clearGridApplied) Key.SideKeySymbol else Key.SideKeyPreviousChar,
                 binding.keyReturn.layoutXPosition(),
                 binding.keyReturn.layoutYPosition(),
                 binding.keyReturn.layoutXPosition() + binding.keyReturn.screenWidth(),
@@ -2292,6 +2322,10 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         val top = container.layoutYPosition()
         val right = left + container.screenWidth()
         val bottom = top + container.screenHeight()
+        if (clearGridApplied) {
+            // Simeji 配置: 左列3段目は「123」
+            return listOf(KeyRect(Key.SideKeyNumberMode, left, top, right, bottom))
+        }
         if (useThreeStateKeyboard) {
             return listOf(KeyRect(Key.SideKeySymbol, left, top, right, bottom))
         }
@@ -2602,13 +2636,23 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
 
     /** Visually indicate which key is pressed **/
     private fun setKeyPressed() {
-        binding.sideKeySymbolModeContainer.setPressedKey(pressedKey.key)
+        if (clearGridApplied) {
+            // Simeji 配置では左上=記号、左3段目=123 として光らせる
+            binding.sideKeySymbolModeContainer.setPressedKey(
+                if (pressedKey.key == Key.SideKeyNumberMode) Key.SideKeySymbol else null
+            )
+        } else {
+            binding.sideKeySymbolModeContainer.setPressedKey(pressedKey.key)
+        }
         listKeys.forEach { (keyEnum, viewObj) ->
             when (viewObj) {
                 is InputModeSwitch -> viewObj.isPressed = (keyEnum == pressedKey.key)
                 is AppCompatButton -> viewObj.isPressed = (keyEnum == pressedKey.key)
                 is AppCompatImageButton -> viewObj.isPressed = (keyEnum == pressedKey.key)
             }
+        }
+        if (clearGridApplied) {
+            binding.keyReturn.isPressed = pressedKey.key == Key.SideKeySymbol
         }
     }
 
@@ -3040,11 +3084,15 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
 
     /** Enable/disable the “previous character” key **/
     fun setSideKeyPreviousState(state: Boolean) {
+        lastPreviousKeyEnabled = state
+        if (clearGridApplied) return
         binding.keyReturn.isEnabled = state
     }
 
     /** Enable/disable the “previous character” key **/
     fun setSideKeyPreviousDrawable(drawable: Drawable?) {
+        lastPreviousKeyDrawable = drawable
+        if (clearGridApplied) return
         KeyboardFontGlyphDrawable.setImageDrawable(binding.keyReturn, drawable, keyboardFontSnapshot)
     }
 
@@ -3099,6 +3147,9 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
             InputMode.ModeJapanese -> setKeysInJapaneseText()
             InputMode.ModeEnglish -> setKeysInEnglishText()
             InputMode.ModeNumber -> setKeysInNumberText()
+        }
+        if (clearGridApplied && inputMode == InputMode.ModeJapanese && !isCursorMode) {
+            applySimejiSideKeys()
         }
     }
 
