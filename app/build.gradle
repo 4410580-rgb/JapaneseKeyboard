@@ -16,6 +16,13 @@ android {
     }
 
     signingConfigs {
+        // 自分専用ビルド: 毎回同じ鍵で署名して上書きインストールできるようにする
+        shared {
+            storeFile file("debug.keystore")
+            storePassword "android"
+            keyAlias "androiddebugkey"
+            keyPassword "android"
+        }
         release {
             if (localProperties['KEYSTORE_FILE']) {
                 storeFile file(localProperties['KEYSTORE_FILE'])
@@ -92,6 +99,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            // 公式版スミレと並べて入れられるよう、別のパッケージ名にする
+            applicationIdSuffix ".clear"
+            versionNameSuffix "-clear"
+            signingConfig signingConfigs.shared
+        }
         release {
             def releaseSigning = signingConfigs.findByName("release")
             if (releaseSigning?.storeFile) {
