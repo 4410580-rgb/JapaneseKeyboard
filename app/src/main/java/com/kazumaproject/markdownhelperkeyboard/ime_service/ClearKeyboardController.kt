@@ -18,6 +18,7 @@ import com.kazumaproject.markdownhelperkeyboard.databinding.MainLayoutBinding
  */
 class ClearKeyboardController(
     private val isAllowed: () -> Boolean,
+    private val hasCandidates: () -> Boolean,
     private val onActiveChanged: (active: Boolean, mainView: MainLayoutBinding) -> Unit,
 ) {
     private var container: FrameLayout? = null
@@ -151,17 +152,48 @@ class ClearKeyboardController(
         val root = mainView?.root ?: return false
         if (!isAllowed() || !root.isShown) return false
         if (windowHeight <= 0 || root.height == 0) return false
+        val floating = isFloatingActive()
+        val region = Region()
+        var top = Int.MAX_VALUE
         val loc = IntArray(2)
-        root.getLocationInWindow(loc)
-        // 浮かせているときはアプリを縮めない。画面下のときはキーボードの上端までアプリを押し上げる。
-        val top = if (isFloatingActive()) windowHeight else loc[1]
-        outInsets.contentTopInsets = top
-        outInsets.visibleTopInsets = top
+        contentViews(floating).forEach { v ->
+            v.getLocationInWindow(loc)
+            region.op(loc[0], loc[1], loc[0] + v.width, loc[1] + v.height, Region.Op.UNION)
+            top = minOf(top, loc[1])
+        }
+        if (top == Int.MAX_VALUE) return false
+        // 浮かせているときはアプリを縮めない。画面下のときは中身の上端までアプリを押し上げる
+        // （候補の段の上にある透明な余白はアプリ側に返す）。
+        val insetTop = if (floating) windowHeight else top
+        outInsets.contentTopInsets = insetTop
+        outInsets.visibleTopInsets = insetTop
         outInsets.touchableInsets = Insets.TOUCHABLE_INSETS_REGION
-        outInsets.touchableRegion.set(
-            Region(loc[0], loc[1], loc[0] + root.width, loc[1] + root.height)
-        )
+        outInsets.touchableRegion.set(region)
         return true
+    }
+
+    /**
+     * 実際に中身がある子ビュー。背景や効果用のレイヤー、隠れた段は含めない。
+     * 浮かせていて候補が無いときは候補の段も外し、その分は裏のアプリを触れるようにする。
+     */
+    private fun contentViews(floating: Boolean): List<View> {
+        val view = mainView ?: return emptyList()
+        val showStrip = !floating || hasCandidates()
+        val strip = listOf(view.suggestionViewParent, view.candidateTabLayout, view.shortcutToolbarRecyclerview)
+        return listOf(
+            view.suggestionViewParent,
+            view.candidateTabLayout,
+            view.shortcutToolbarRecyclerview,
+            view.keyboardView,
+            view.gojuonView,
+            view.qwertyView,
+            view.customLayoutDefault,
+            view.gemmaHandwritingKeyboard,
+            view.candidatesRowView,
+            view.keyboardSymbolView,
+        ).filter { v ->
+            v.isShown && v.width > 0 && v.height > 0 && (showStrip || v !in strip)
+        }
     }
 
     private fun sync() {
@@ -187,6 +219,9 @@ class ClearKeyboardController(
                 hidden = listOf(view.keyboardBackgroundContainer, view.shortcutToolbarRecyclerview),
             )
         }
+        // 浮かせていて候補が無いときは候補の段ごと見えなくする（触れる範囲からも外している）
+        val stripAlpha = if (floating && !hasCandidates()) 0f else 1f
+        if (view.suggestionViewParent.alpha != stripAlpha) view.suggestionViewParent.alpha = stripAlpha
     }
 }
 

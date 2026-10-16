@@ -1720,6 +1720,9 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
     // 透過キーボード（日本語テンキーを格子だけで描き、アプリを縮めない）
     private val clearKeyboard = ClearKeyboardController(
         isAllowed = { isClearKeyboardAllowed() },
+        hasCandidates = {
+            inputString.value.isNotEmpty() || suggestionAdapter?.suggestions?.isNotEmpty() == true
+        },
         onActiveChanged = { active, mainView -> onClearKeyboardActiveChanged(active, mainView) },
     )
 
@@ -25942,8 +25945,9 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                 commitAndClearInput(readingCorrection.first)
             }
 
-            9 -> {
-                // 予測候補も学習する（元は学習せずに確定していたので、選んでも先頭に上がらなかった）
+            9, 11, 12, 13 -> {
+                // 予測候補・絵文字・顔文字・記号も学習する（元は学習せずに確定していたので、
+                // 選んでも先頭に上がらなかった）
                 val reading = candidate.yomi?.takeIf { it.isNotEmpty() } ?: insertString
                 recordCandidateLearning(
                     currentInputMode = currentInputMode,
@@ -25957,9 +25961,6 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                 commitAndClearInput(candidate.string)
             }
 
-            11,
-            12,
-            13,
             14,
             28,
             30,

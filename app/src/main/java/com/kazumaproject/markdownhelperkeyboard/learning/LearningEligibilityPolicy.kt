@@ -10,10 +10,7 @@ object LearningEligibilityPolicy {
     ): Boolean {
         if (input.isBlank() || output.isBlank()) return false
         if (!output.containsSymbolNumberOrEmoji()) return true
-        if (!allowJapaneseWithSymbolsAndNumbers) return false
-
-        // Keep useful mixed phrases such as「令和8年」or「C++入門」while excluding entries that
-        // consist only of numbers, symbols, or emoji.
-        return output.any { character -> Character.isLetter(character.code) }
+        // 自分用: 「てん→、」「かっこ→「」」のような記号だけの候補も覚える
+        return allowJapaneseWithSymbolsAndNumbers
     }
 }
