@@ -220,7 +220,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
     private var lastThemeApply: (() -> Unit)? = null
     private var onClearGridChanged: ((Boolean) -> Unit)? = null
     private val clearGridPaint = android.graphics.Paint().apply {
-        color = 0x66FFFFFF
+        color = 0x88FFFFFF.toInt()
         style = android.graphics.Paint.Style.FILL
     }
 
@@ -719,15 +719,20 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
             val bottom = cellBottom(key11)
             val left = cellLeft(key1)
             val right = cellRight(key3)
-            // 縦線: あ|か、か|さ の境目
+            val y1 = (cellBottom(key1) + cellTop(key4)) / 2f
+            val y2 = (cellBottom(key4) + cellTop(key7)) / 2f
+            val y3 = (cellBottom(key7) + cellTop(key11)) / 2f
+            // 縦線（中央2本）: あ|か、か|さ の境目。4段ぶん
             listOf((cellRight(key1) + cellLeft(key2)) / 2f, (cellRight(key2) + cellLeft(key3)) / 2f)
                 .forEach { x -> canvas.drawRect(x - half, top, x + half, bottom, clearGridPaint) }
-            // 横線: 1|2段、2|3段、3|4段 の境目
-            listOf(
-                (cellBottom(key1) + cellTop(key4)) / 2f,
-                (cellBottom(key4) + cellTop(key7)) / 2f,
-                (cellBottom(key7) + cellTop(key11)) / 2f,
-            ).forEach { y -> canvas.drawRect(left, y - half, right, y + half, clearGridPaint) }
+            // 縦線（左右2本）: 左列|あ、さ|右列 の境目。上から3段ぶん
+            listOf((cellRight(keyReturn) + cellLeft(key1)) / 2f, (cellRight(key3) + cellLeft(keyDelete)) / 2f)
+                .forEach { x -> canvas.drawRect(x - half, top, x + half, y3, clearGridPaint) }
+            // 横線: 上2本は5列ぶん（端から端まで）、3本目は中央3列ぶん
+            listOf(y1, y2).forEach { y ->
+                canvas.drawRect(0f, y - half, width.toFloat(), y + half, clearGridPaint)
+            }
+            canvas.drawRect(left, y3 - half, right, y3 + half, clearGridPaint)
         }
     }
 
