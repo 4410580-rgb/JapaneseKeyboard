@@ -345,7 +345,7 @@
             android:dependency="learn_dictionary_preference"
             android:key="learn_first_candidate_dictionary_preference"
             android:title="@string/learn_dictionary_preference_title"
-            app:defaultValue="false"
+            app:defaultValue="true"
             app:summary="@string/learn_dictionary_preference_summary" />
 
         <SwitchPreferenceCompat
@@ -359,11 +359,11 @@
             android:dependency="learn_dictionary_preference"
             android:key="enable_prediction_search_learn_dictionary_preference"
             android:title="@string/enable_prediction_search_learn_dictionary_preference_titile"
-            app:defaultValue="false"
+            app:defaultValue="true"
             app:summary="@string/enable_prediction_search_learn_dictionary_preference_summary" />
 
         <SeekBarPreference
-            android:defaultValue="4"
+            android:defaultValue="1"
             android:dependency="enable_prediction_search_learn_dictionary_preference"
             android:key="learn_prediction_preference"
             android:max="8"

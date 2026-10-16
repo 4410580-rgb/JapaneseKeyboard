@@ -71,7 +71,8 @@ class ClearKeyboardController(
             .putBoolean(PREF_FLOATING, next)
             .putFloat(PREF_LIFT, liftPx)
             .apply()
-        applyLift(isActive())
+        lastFloatingActive = null
+        applyLift(isFloatingActive())
         // insets（アプリを押し上げるかどうか）を取り直してもらう
         c.post { c.requestLayout() }
     }
@@ -84,7 +85,7 @@ class ClearKeyboardController(
     private fun applyLift(active: Boolean) {
         val c = container ?: return
         if (liftPx < 0f) liftPx = prefs(c.context).getFloat(PREF_LIFT, 0f)
-        val bottom = if (active && isFloatingOn(c.context)) liftPx.toInt() else 0
+        val bottom = if (active) liftPx.toInt() else 0
         if (c.paddingBottom != bottom) c.setPadding(0, 0, 0, bottom)
     }
 
@@ -106,6 +107,7 @@ class ClearKeyboardController(
         mainView = null
         container = null
         lastActive = null
+        lastFloatingActive = null
     }
 
     /** いま透過モードとして振る舞うべきか。 */
@@ -117,13 +119,24 @@ class ClearKeyboardController(
             !view.keyboardSymbolView.isVisible
     }
 
-    /** onComputeInsets から呼ぶ。透過中なら true を返し、アプリを縮めない insets を入れる。 */
-    fun computeInsets(outInsets: Insets, windowHeight: Int): Boolean {
-        if (!isActive()) return false
-        // 画面下に固定しているときは普通のキーボードと同じくアプリを押し上げる。
-        // 浮かせているときだけ、アプリを縮めずに裏を見せる。
+    /**
+     * 浮かせている状態か。テンキー・QWERTY・候補の全画面表示・記号など、
+     * どのキーボードでも同じ高さに浮かせる。
+     */
+    fun isFloatingActive(): Boolean {
         val c = container ?: return false
-        if (!isFloatingOn(c.context)) return false
+        val view = mainView ?: return false
+        return isAllowed() && isFloatingOn(c.context) && view.root.isShown
+    }
+
+    private var lastFloatingActive: Boolean? = null
+
+    /**
+     * onComputeInsets から呼ぶ。浮かせている間は true を返し、アプリを縮めない insets を入れる。
+     * 画面下に固定しているときは普通のキーボードと同じくアプリを押し上げる。
+     */
+    fun computeInsets(outInsets: Insets, windowHeight: Int): Boolean {
+        if (!isFloatingActive()) return false
         val root = mainView?.root ?: return false
         if (windowHeight <= 0 || root.height == 0) return false
         val loc = IntArray(2)
@@ -143,9 +156,14 @@ class ClearKeyboardController(
         if (active != lastActive) {
             lastActive = active
             if (!active) chrome.restore(view.root, view.suggestionViewParent, view.candidateTabLayout)
-            applyLift(active)
             onActiveChanged(active, view)
             // insets を取り直してもらう
+            container?.post { container?.requestLayout() }
+        }
+        val floating = isFloatingActive()
+        if (floating != lastFloatingActive) {
+            lastFloatingActive = floating
+            applyLift(floating)
             container?.post { container?.requestLayout() }
         }
         if (active) {

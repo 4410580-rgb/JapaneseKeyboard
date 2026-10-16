@@ -1729,6 +1729,17 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
      */
     private fun resetKeyboardSizeOnceForClearKeyboard() {
         val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this)
+        // 学習: 先頭候補を選んでも覚える・学習した語を1文字目から予測の先頭に出す
+        // （設定画面を開いたときに XML の既定値 false/4 が書き込まれていたので上書きする）
+        if (!prefs.getBoolean("clear_keyboard_learn_v1", false)) {
+            prefs.edit()
+                .putBoolean("learn_dictionary_preference", true)
+                .putBoolean("learn_first_candidate_dictionary_preference", true)
+                .putBoolean("enable_prediction_search_learn_dictionary_preference", true)
+                .putInt("learn_prediction_preference", 1)
+                .putBoolean("clear_keyboard_learn_v1", true)
+                .apply()
+        }
         if (prefs.getBoolean("clear_keyboard_size_reset_v1", false)) return
         appPreference.keyboard_height = 220
         appPreference.keyboard_width = 100
