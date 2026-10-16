@@ -332,7 +332,12 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
                 val delay = (longPressTimeout * 8 / 10).coerceAtLeast(250L)
                 if (isOnView(binding.keyReturn, ev.rawX, ev.rawY)) {
                     postDelayed(toggleFloatingRunnable, delay)
-                } else if (!isOnDeleteKey(ev.rawX, ev.rawY) && moveDragListener?.canMove() == true) {
+                } else if (!isOnDeleteKey(ev.rawX, ev.rawY) &&
+                    // ← → も ⌫ と同じく、長押しは連続移動を優先する
+                    !isOnView(binding.keySoftLeft, ev.rawX, ev.rawY) &&
+                    !isOnView(binding.keyMoveCursorRight, ev.rawX, ev.rawY) &&
+                    moveDragListener?.canMove() == true
+                ) {
                     postDelayed(moveStartRunnable, delay)
                 }
             }
