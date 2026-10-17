@@ -271,8 +271,10 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         fun onCharMove(right: Boolean)
         /** 候補が出ている間の左上のマス: タップ（指の位置の候補を選ぶ） */
         fun onCandidateTap(rawX: Float)
-        /** 候補が出ている間の左上のマス: スライドで候補の選択を1つ動かす */
-        fun onCandidateStep(right: Boolean)
+        /** 候補が出ている間の左上のマス: スライド中、指の真上の候補を選ぶ */
+        fun onCandidateHover(rawX: Float)
+        /** 画面端にいる間、候補欄を滑らかにスクロールして指の真上の候補を選び直す */
+        fun onCandidateScroll(dxPx: Float, rawX: Float)
         /** 候補が出ている間の左上のマス: 長押しで候補一覧 */
         fun onCandidateListToggle()
     }
@@ -388,11 +390,17 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         candidateLongPressed = true
         moveDragListener?.onCandidateListToggle()
     }
+    private var candidateEdgeLastFrameNs = 0L
     private val candidateEdgeRunnable = object : Runnable {
         override fun run() {
             if (!candidateGesture || candidateEdgeDir == 0) return
-            moveDragListener?.onCandidateStep(candidateEdgeDir > 0)
-            postDelayed(this, CANDIDATE_EDGE_REPEAT_MS)
+            val now = System.nanoTime()
+            val dtMs = ((now - candidateEdgeLastFrameNs) / 1_000_000f).coerceIn(0f, 50f)
+            candidateEdgeLastFrameNs = now
+            val dx = candidateEdgeDir * CANDIDATE_EDGE_SPEED_DP_PER_MS *
+                resources.displayMetrics.density * dtMs
+            moveDragListener?.onCandidateScroll(dx, candidateLastRawX)
+            postOnAnimation(this)
         }
     }
 
@@ -431,7 +439,8 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
                     candidateLastTime = ev.eventTime
                 }
                 if (!candidateSliding) return true
-                // 画面の左右の端では、指の動きに関係なく一定の速さで送り続ける
+                candidateLastRawX = ev.rawX
+                // 画面の左右の端では、候補欄を一定の速さで滑らかにスクロールし続ける
                 val screenWidth = resources.displayMetrics.widthPixels
                 val edge = screenWidth * CANDIDATE_EDGE_RATIO
                 val edgeDir = when {
@@ -442,29 +451,13 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
                 if (edgeDir != candidateEdgeDir) {
                     candidateEdgeDir = edgeDir
                     removeCallbacks(candidateEdgeRunnable)
-                    if (edgeDir != 0) post(candidateEdgeRunnable)
-                }
-                if (edgeDir == 0) {
-                    // パソコンのカーソルのように、速く動かすほど1回の動きで多く進む
-                    val dx = ev.rawX - candidateLastRawX
-                    val dt = (ev.eventTime - candidateLastTime).coerceAtLeast(1L)
-                    val speed = kotlin.math.abs(dx) / dt // px/ms
-                    val gain = (0.6f + speed / density * 1.2f).coerceIn(0.6f, 4f)
-                    candidateAccum += dx * gain
-                    val stepPx = CANDIDATE_STEP_DP * density
-                    while (candidateAccum >= stepPx) {
-                        moveDragListener?.onCandidateStep(true)
-                        candidateAccum -= stepPx
+                    if (edgeDir != 0) {
+                        candidateEdgeLastFrameNs = System.nanoTime()
+                        postOnAnimation(candidateEdgeRunnable)
                     }
-                    while (candidateAccum <= -stepPx) {
-                        moveDragListener?.onCandidateStep(false)
-                        candidateAccum += stepPx
-                    }
-                } else {
-                    candidateAccum = 0f
                 }
-                candidateLastRawX = ev.rawX
-                candidateLastTime = ev.eventTime
+                // 画面の中ほどでは、指の真上の候補を選ぶ
+                if (edgeDir == 0) moveDragListener?.onCandidateHover(ev.rawX)
             }
 
             MotionEvent.ACTION_UP -> {
@@ -599,12 +592,10 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
     private companion object LineMoveTiming {
         /** 連続移動の間隔。← → の長押し（1文字ずつ）と同じ 64ms */
         const val LINE_MOVE_FIRST_REPEAT_MS = 64L
-        /** 候補スライド: 等倍のときに候補1つ分進むのに必要な指の移動量 */
-        const val CANDIDATE_STEP_DP = 28f
-        /** 候補スライド: 画面の左右これだけの幅に指があると一定の速さで送る */
-        const val CANDIDATE_EDGE_RATIO = 0.08f
-        /** 候補スライド: 端での送りの間隔 */
-        const val CANDIDATE_EDGE_REPEAT_MS = 110L
+        /** 候補スライド: 画面の左右これだけの幅に指があると候補欄をスクロールし続ける */
+        const val CANDIDATE_EDGE_RATIO = 0.1f
+        /** 候補スライド: 端でのスクロールの速さ（dp/ms。0.5 = 1秒に 500dp） */
+        const val CANDIDATE_EDGE_SPEED_DP_PER_MS = 0.5f
     }
 
     private fun clearGridKeys(): List<View> = binding.run {

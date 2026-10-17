@@ -1807,6 +1807,45 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         }
     }
 
+    /**
+     * 左上のマスからのスライド: 指の真上にある候補を選ぶ（指に追従）。
+     * 候補欄は勝手にスクロールさせない（指の下の候補が変わってしまうため）。
+     */
+    private fun hoverClearCandidate(rawX: Float) {
+        val mv = mainLayoutBinding ?: return
+        val rv = mv.suggestionRecyclerView
+        val loc = IntArray(2)
+        rv.getLocationOnScreen(loc)
+        val child = rv.findChildViewUnder(rawX - loc[0], rv.height / 2f) ?: return
+        val pos = rv.getChildAdapterPosition(child)
+        val suggestions = suggestionAdapter?.suggestions.orEmpty()
+        val input = inputString.value
+        if (!clearKeyboard.isActive() || input.isEmpty() || pos !in suggestions.indices) return
+        if (isHenkan.get() && suggestionClickNum - 1 == pos) return
+        isHenkan.set(true)
+        suggestionClickNum = pos + 1
+        suggestionAdapter?.updateHighlightPosition(pos)
+        setConvertLetterInJapaneseFromButton(suggestions, true, mv, input)
+    }
+
+    /** 候補を選べる状態で ← → を長押ししたら、候補の選択を連続で動かす。始めたら true */
+    private fun startClearCandidateRepeat(right: Boolean): Boolean {
+        val mv = mainLayoutBinding ?: return false
+        if (!clearKeyboard.isActive() || inputString.value.isEmpty() ||
+            suggestionAdapter?.suggestions.isNullOrEmpty()
+        ) return false
+        val pressed = if (right) rightCursorKeyLongKeyPressed else leftCursorKeyLongKeyPressed
+        pressed.set(true)
+        val job = scope.launch {
+            while (isActive && pressed.get()) {
+                moveClearCandidate(right, mv, suggestionAdapter?.suggestions.orEmpty(), inputString.value)
+                delay(CLEAR_CANDIDATE_REPEAT_MS)
+            }
+        }
+        if (right) rightLongPressJob = job else leftLongPressJob = job
+        return true
+    }
+
     /** 左上のマスのタップ: 指の横位置にある候補を、候補欄を直接タップしたのと同じように選ぶ */
     private fun tapClearCandidateAt(rawX: Float) {
         val rv = mainLayoutBinding?.suggestionRecyclerView ?: return
@@ -2401,6 +2440,8 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
 
     companion object {
         private const val LONG_DELAY_TIME = 64L
+        /** 透過キーボード: ← → 長押しで候補を送る間隔 */
+        private const val CLEAR_CANDIDATE_REPEAT_MS = 90L
         private const val DEFAULT_DELAY_MS = 1000L
         private const val DEFAULT_LIVE_CONVERSION_APPLY_DELAY_MS = 120L
         private const val PAGE_SIZE: Int = 5
@@ -11582,9 +11623,10 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                 override fun onLineMove(up: Boolean) = moveCursorOneLine(up)
                 override fun onCharMove(right: Boolean) = moveCursorOneChar(right)
                 override fun onCandidateTap(rawX: Float) = tapClearCandidateAt(rawX)
-                override fun onCandidateStep(right: Boolean) {
-                    val mv = mainLayoutBinding ?: return
-                    moveClearCandidate(right, mv, suggestionAdapter?.suggestions.orEmpty(), inputString.value)
+                override fun onCandidateHover(rawX: Float) = hoverClearCandidate(rawX)
+                override fun onCandidateScroll(dxPx: Float, rawX: Float) {
+                    mainLayoutBinding?.suggestionRecyclerView?.scrollBy(dxPx.roundToInt(), 0)
+                    hoverClearCandidate(rawX)
                 }
                 override fun onCandidateListToggle() {
                     _suggestionViewStatus.update { !it }
@@ -12444,6 +12486,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
             }
 
             Key.SideKeyCursorLeft -> {
+                if (startClearCandidateRepeat(right = false)) return
                 handleLeftLongPress()
                 leftCursorKeyLongKeyPressed.set(true)
                 if (selectMode.value) {
@@ -12455,6 +12498,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
             }
 
             Key.SideKeyCursorRight -> {
+                if (startClearCandidateRepeat(right = true)) return
                 handleRightLongPress()
                 rightCursorKeyLongKeyPressed.set(true)
                 if (selectMode.value) {
