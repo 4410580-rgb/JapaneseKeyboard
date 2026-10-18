@@ -219,8 +219,13 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
     private var clearGridApplied = false
     private var lastThemeApply: (() -> Unit)? = null
     private var onClearGridChanged: ((Boolean) -> Unit)? = null
+    // 格子の色は Claude（Anthropic）の公式配色: 線 = Orange #d97757、ふち = Dark #141413
     private val clearGridPaint = android.graphics.Paint().apply {
-        color = 0x88FFFFFF.toInt()
+        color = 0xE6D97757.toInt()
+        style = android.graphics.Paint.Style.FILL
+    }
+    private val clearGridHaloPaint = android.graphics.Paint().apply {
+        color = 0x99141413.toInt()
         style = android.graphics.Paint.Style.FILL
     }
 
@@ -282,6 +287,17 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         fun onCandidateScroll(dxPx: Float, rawX: Float)
         /** 候補が出ている間の左上のマス: 長押しで候補一覧 */
         fun onCandidateListToggle()
+        /** 濁点キーを編集キーとして使うか（入力中は濁点のまま） */
+        fun editKeyMode(): EditKeyMode = EditKeyMode.Off
+        /** 編集キーの操作 */
+        fun onEditAction(action: EditAction) {}
+    }
+
+    enum class EditKeyMode { Off, Normal, Selection }
+
+    enum class EditAction(val label: String) {
+        Paste("貼り付け"), SelectAll("全選択"), LineStart("行頭"), LineEnd("行末"),
+        Copy("コピー"), Cut("切り取り"),
     }
 
     private var moveDragListener: MoveDragListener? = null
@@ -486,9 +502,130 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         invalidate()
     }
 
+    // ---- 濁点キーの編集キー（文字入力中以外）: タップ / 上 / 左 / 右。下は何もしない ----
+    private var editGesture = false
+    private var editMode = EditKeyMode.Off
+    private var editAction: EditAction? = null
+    private var editDirection = GestureType.Tap
+    private var editSavedTextSize = -1f
+    private val editMoveRunnable = Runnable {
+        // 動かさずに長押ししたら、浮かせている間はキーボードを掴む（ほかのキーと同じ）
+        if (!editGesture || editDirection != GestureType.Tap) return@Runnable
+        if (moveDragListener?.canMove() != true) return@Runnable
+        endEditGesture()
+        startMoveDrag()
+    }
+
+    private fun editActionFor(direction: GestureType): EditAction? {
+        val selection = editMode == EditKeyMode.Selection
+        return when (direction) {
+            GestureType.Tap -> if (selection) EditAction.Copy else EditAction.Paste
+            GestureType.FlickTop -> if (selection) EditAction.Cut else EditAction.SelectAll
+            GestureType.FlickLeft -> EditAction.LineStart
+            GestureType.FlickRight -> EditAction.LineEnd
+            else -> null
+        }
+    }
+
+    private fun showEditPopup(direction: GestureType, action: EditAction?) {
+        val anchor = binding.keySmallLetter
+        if (action == null) {
+            popupWindowActive.hide()
+            return
+        }
+        if (editSavedTextSize < 0f) editSavedTextSize = popTextActive.textSize
+        // 名前がキーの幅に収まる大きさにする
+        val fit = anchor.width * 0.8f / action.label.length.coerceAtLeast(1)
+        popTextActive.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, minOf(editSavedTextSize, fit))
+        popTextActive.text = action.label
+        val scale = popupViewStyle.sizeScalePercent
+        when (direction) {
+            GestureType.FlickTop -> popupWindowActive.setPopUpWindowFlickTop(context, bubbleViewActive, anchor, scale)
+            GestureType.FlickLeft -> popupWindowActive.setPopUpWindowFlickLeft(context, bubbleViewActive, anchor, scale)
+            GestureType.FlickRight -> popupWindowActive.setPopUpWindowFlickRight(context, bubbleViewActive, anchor, scale)
+            else -> popupWindowActive.setPopUpWindowCenter(context, bubbleViewActive, anchor, scale)
+        }
+    }
+
+    private fun editDirectionOf(ev: MotionEvent): GestureType {
+        val dx = ev.rawX - moveDownRawX
+        val dy = ev.rawY - moveDownRawY
+        if (kotlin.math.abs(dx) < flickThresholdPx && kotlin.math.abs(dy) < flickThresholdPx) return GestureType.Tap
+        return if (kotlin.math.abs(dx) > kotlin.math.abs(dy)) {
+            if (dx < 0) GestureType.FlickLeft else GestureType.FlickRight
+        } else {
+            if (dy < 0) GestureType.FlickTop else GestureType.FlickBottom
+        }
+    }
+
+    private fun handleEditGesture(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                editGesture = true
+                moveDownRawX = ev.rawX
+                moveDownRawY = ev.rawY
+                moveDragging = false
+                moveGestureIsDrag = false
+                lineMoveCandidate = false
+                editDirection = GestureType.Tap
+                editAction = editActionFor(GestureType.Tap)
+                binding.keySmallLetter.isPressed = true
+                showEditPopup(editDirection, editAction)
+                postDelayed(editMoveRunnable, (longPressTimeout * 8 / 10).coerceAtLeast(250L))
+                invalidate()
+            }
+
+            MotionEvent.ACTION_MOVE -> {
+                val direction = editDirectionOf(ev)
+                if (direction != editDirection) {
+                    removeCallbacks(editMoveRunnable)
+                    editDirection = direction
+                    editAction = editActionFor(direction)
+                    showEditPopup(direction, editAction)
+                }
+            }
+
+            MotionEvent.ACTION_UP -> {
+                val action = editAction
+                endEditGesture()
+                action?.let { moveDragListener?.onEditAction(it) }
+            }
+
+            MotionEvent.ACTION_CANCEL -> endEditGesture()
+        }
+        return true
+    }
+
+    private fun endEditGesture() {
+        editGesture = false
+        editAction = null
+        removeCallbacks(editMoveRunnable)
+        popupWindowActive.hide()
+        if (editSavedTextSize >= 0f) {
+            popTextActive.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, editSavedTextSize)
+            editSavedTextSize = -1f
+        }
+        binding.keySmallLetter.isPressed = false
+        invalidate()
+    }
+
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         if (!clearGridApplied || moveDragListener == null) return super.dispatchTouchEvent(ev)
         if (candidateGesture) return handleCandidateGesture(ev)
+        if (editGesture) return handleEditGesture(ev)
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN && !isCursorMode &&
+            currentInputMode.value == InputMode.ModeJapanese &&
+            isOnView(binding.keySmallLetter, ev.rawX, ev.rawY)
+        ) {
+            val mode = moveDragListener?.editKeyMode() ?: EditKeyMode.Off
+            if (mode != EditKeyMode.Off) {
+                editMode = mode
+                stopLineMove()
+                removeCallbacks(moveStartRunnable)
+                removeCallbacks(toggleFloatingRunnable)
+                return handleEditGesture(ev)
+            }
+        }
         if (ev.actionMasked == MotionEvent.ACTION_DOWN && candidateOverlay &&
             isOnView(binding.keyReturn, ev.rawX, ev.rawY)
         ) {
@@ -635,7 +772,8 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
                 onPressedChanged = clearPressInvalidator
             )
         )
-        binding.sideKeySymbolModeContainer.alpha = 0f
+        binding.sideKeySymbolModeContainer.alpha = clearKeyAlpha(binding.sideKeySymbolModeContainer)
+        if (!isCursorMode) applySimejiSideKeys()
         invalidate()
     }
 
@@ -645,14 +783,11 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
 
     /**
      * 透過中のキーの不透明度。日本語は全部消す。数字は 0〜9 だけ消し、
-     * 記号などの残りの文字は薄く（スケルトンで）見せる。左右の列は消す。
+     * 記号などの残りの文字と左右の列は薄く（スケルトンで）見せる。
      */
-    private fun clearKeyAlpha(view: View): Float {
-        if (!isNumberClear()) return 0f
-        val isCharacterKey = view === binding.keySmallLetter ||
-            (view is AppCompatButton && keyForCharacterButton(view) != null)
-        return if (isCharacterKey) NUMBER_SKELETON_ALPHA else 0f
-    }
+    @Suppress("UNUSED_PARAMETER")
+    private fun clearKeyAlpha(view: View): Float =
+        if (isNumberClear()) NUMBER_SKELETON_ALPHA else 0f
 
     /** 透過の数字テンキーでは、キーの文字から 0〜9 だけを取り除く */
     private fun stripDigitsFromNumberLabels() {
@@ -671,24 +806,34 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
     }
 
     private val clearPressInvalidator: () -> Unit = { invalidate() }
-    private val clearPressedPaint = android.graphics.Paint().apply { color = 0x40FFFFFF }
+    private val clearPressedPaint = android.graphics.Paint().apply { color = 0x40FAF9F5 }
 
     private var lastPreviousKeyDrawable: Drawable? = null
     private var lastPreviousKeyEnabled: Boolean = true
 
-    /** Simeji と同じ左列: 記号 / ← / 123 / あA */
+    /**
+     * Simeji と同じ左列: 記号 / ← / 123 / あA。
+     * 数字テンキーでは下の2マスを入れ替える: 記号 / ← / あいう（日本語へ） / 記号
+     */
     private fun applySimejiSideKeys() {
         binding.keyReturn.isEnabled = true
         KeyboardFontGlyphDrawable.setImageDrawable(
             binding.keyReturn, cachedSymbolDrawable, keyboardFontSnapshot
         )
+        val number = currentInputMode.value == InputMode.ModeNumber
         binding.sideKeySymbolModeContainer.setSymbolImageDrawable(
             KeyboardFontGlyphDrawable.create(
                 context,
-                com.kazumaproject.core.R.drawable.input_mode_number_select_custom,
+                if (number) com.kazumaproject.core.R.drawable.input_mode_japanese_select_custom
+                else com.kazumaproject.core.R.drawable.input_mode_number_select_custom,
                 keyboardFontSnapshot,
             )
         )
+        if (number) {
+            KeyboardFontGlyphDrawable.setImageDrawable(
+                binding.keySwitchKeyMode, cachedSymbolDrawable, keyboardFontSnapshot
+            )
+        }
     }
 
     private fun restoreSideKeys() {
@@ -743,8 +888,12 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         }
     }
 
-    /** 中央 3 列だけの格子: 縦線 2 本（4 段ぶん）と横線 3 本（3 列ぶん）。 */
+    /**
+     * 格子: 縦線は中央2本が4段・左右の境目が3段、横線は上2本が5列・3本目が中央3列。
+     * どんな背景でも見えるよう、暗いふちを先に全部描いてから、その上にオレンジの線を描く。
+     */
     private fun drawCenterGrid(canvas: android.graphics.Canvas, half: Float) {
+        val rects = ArrayList<android.graphics.RectF>(8)
         binding.apply {
             fun cellLeft(v: View) = v.left - ((v.layoutParams as? LayoutParams)?.marginStart ?: 0).toFloat()
             fun cellRight(v: View) = v.right + ((v.layoutParams as? LayoutParams)?.marginEnd ?: 0).toFloat()
@@ -760,16 +909,21 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
             val y3 = (cellBottom(key7) + cellTop(key11)) / 2f
             // 縦線（中央2本）: あ|か、か|さ の境目。4段ぶん
             listOf((cellRight(key1) + cellLeft(key2)) / 2f, (cellRight(key2) + cellLeft(key3)) / 2f)
-                .forEach { x -> canvas.drawRect(x - half, top, x + half, bottom, clearGridPaint) }
+                .forEach { x -> rects += android.graphics.RectF(x - half, top, x + half, bottom) }
             // 縦線（左右2本）: 左列|あ、さ|右列 の境目。上から3段ぶん
             listOf((cellRight(keyReturn) + cellLeft(key1)) / 2f, (cellRight(key3) + cellLeft(keyDelete)) / 2f)
-                .forEach { x -> canvas.drawRect(x - half, top, x + half, y3, clearGridPaint) }
+                .forEach { x -> rects += android.graphics.RectF(x - half, top, x + half, y3) }
             // 横線: 上2本は5列ぶん（端から端まで）、3本目は中央3列ぶん
             listOf(y1, y2).forEach { y ->
-                canvas.drawRect(0f, y - half, width.toFloat(), y + half, clearGridPaint)
+                rects += android.graphics.RectF(0f, y - half, width.toFloat(), y + half)
             }
-            canvas.drawRect(left, y3 - half, right, y3 + half, clearGridPaint)
+            rects += android.graphics.RectF(left, y3 - half, right, y3 + half)
         }
+        val halo = resources.displayMetrics.density.coerceAtLeast(1f)
+        rects.forEach { r ->
+            canvas.drawRect(r.left - halo, r.top - halo, r.right + halo, r.bottom + halo, clearGridHaloPaint)
+        }
+        rects.forEach { r -> canvas.drawRect(r, clearGridPaint) }
     }
 
     // Popups: active (center) and directional

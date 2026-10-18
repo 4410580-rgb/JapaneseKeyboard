@@ -1745,6 +1745,34 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
      * 以前のフローティング窓の操作で、標準キーボードの幅・高さ・位置まで変わってしまっていた。
      * 一度だけ既定値に戻す（透過キーボードの浮かせ方は別に持つ）。
      */
+    private fun addUserWordsOnce(
+        prefs: android.content.SharedPreferences,
+        flag: String,
+        word: String,
+        readings: List<String>,
+    ) {
+        if (prefs.getBoolean(flag, false)) return
+        ioScope.launch {
+            runCatching {
+                readings.forEach { reading ->
+                    val exists = userDictionaryRepository.searchByReadingExactMatchSuspend(reading)
+                        .any { it.word == word }
+                    if (!exists) {
+                        userDictionaryRepository.insert(
+                            com.kazumaproject.markdownhelperkeyboard.user_dictionary.database.UserWord(
+                                word = word,
+                                reading = reading,
+                                posIndex = 0,
+                                posScore = 3000,
+                            )
+                        )
+                    }
+                }
+                prefs.edit().putBoolean(flag, true).apply()
+            }.onFailure { Timber.w(it, "Unable to add $word to the user dictionary") }
+        }
+    }
+
     private fun resetKeyboardSizeOnceForClearKeyboard() {
         val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this)
         // 学習: 先頭候補を選んでも覚える・学習した語を1文字目から予測の先頭に出す
@@ -1772,28 +1800,9 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                 .putBoolean("clear_keyboard_learn_v1", true)
                 .apply()
         }
-        // ユーザー辞書に「@gmail.com」を入れる（読み: あっと / じーめーる）。消されたら戻さない
-        if (!prefs.getBoolean("clear_keyboard_gmail_word_v1", false)) {
-            ioScope.launch {
-                runCatching {
-                    listOf("あっと", "じーめーる").forEach { reading ->
-                        val exists = userDictionaryRepository.searchByReadingExactMatchSuspend(reading)
-                            .any { it.word == "@gmail.com" }
-                        if (!exists) {
-                            userDictionaryRepository.insert(
-                                com.kazumaproject.markdownhelperkeyboard.user_dictionary.database.UserWord(
-                                    word = "@gmail.com",
-                                    reading = reading,
-                                    posIndex = 0,
-                                    posScore = 3000,
-                                )
-                            )
-                        }
-                    }
-                    prefs.edit().putBoolean("clear_keyboard_gmail_word_v1", true).apply()
-                }.onFailure { Timber.w(it, "Unable to add @gmail.com to the user dictionary") }
-            }
-        }
+        // ユーザー辞書に入れておく語（一度だけ。消されたら戻さない）
+        addUserWordsOnce(prefs, "clear_keyboard_gmail_word_v1", "@gmail.com", listOf("あっと", "じーめーる"))
+        addUserWordsOnce(prefs, "clear_keyboard_claude_word_v1", "Claude", listOf("くろーど"))
         if (prefs.getBoolean("clear_keyboard_size_reset_v1", false)) return
         appPreference.keyboard_height = 220
         appPreference.keyboard_width = 100
@@ -1803,6 +1812,44 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         appPreference.keyboard_margin_end_dp = 0
         appPreference.is_floating_mode = false
         prefs.edit().putBoolean("clear_keyboard_size_reset_v1", true).apply()
+    }
+
+    /**
+     * 濁点キーを編集キーとして使うか。文字入力中（未確定の文字がある間）は濁点のまま。
+     * 文字を選択していればコピー・切り取り、そうでなければ貼り付け・全選択。
+     */
+    private fun clearEditKeyMode(): com.kazumaproject.tenkey.TenKey.EditKeyMode {
+        if (inputString.value.isNotEmpty() || isHenkan.get()) {
+            return com.kazumaproject.tenkey.TenKey.EditKeyMode.Off
+        }
+        val selected = currentInputConnection?.getSelectedText(0)
+        return if (!selected.isNullOrEmpty()) {
+            com.kazumaproject.tenkey.TenKey.EditKeyMode.Selection
+        } else {
+            com.kazumaproject.tenkey.TenKey.EditKeyMode.Normal
+        }
+    }
+
+    private fun performClearEditAction(action: com.kazumaproject.tenkey.TenKey.EditAction) {
+        val ic = currentInputConnection ?: return
+        when (action) {
+            com.kazumaproject.tenkey.TenKey.EditAction.Paste -> {
+                invalidateZeroQueryForEditorMutation()
+                ic.performContextMenuAction(android.R.id.paste)
+            }
+            com.kazumaproject.tenkey.TenKey.EditAction.SelectAll ->
+                ic.performContextMenuAction(android.R.id.selectAll)
+            com.kazumaproject.tenkey.TenKey.EditAction.Copy ->
+                ic.performContextMenuAction(android.R.id.copy)
+            com.kazumaproject.tenkey.TenKey.EditAction.Cut -> {
+                invalidateZeroQueryForEditorMutation()
+                ic.performContextMenuAction(android.R.id.cut)
+            }
+            com.kazumaproject.tenkey.TenKey.EditAction.LineStart ->
+                sendDownUpKeyEvents(android.view.KeyEvent.KEYCODE_MOVE_HOME)
+            com.kazumaproject.tenkey.TenKey.EditAction.LineEnd ->
+                sendDownUpKeyEvents(android.view.KeyEvent.KEYCODE_MOVE_END)
+        }
     }
 
     /** ← → の上下フリック: 1行上/下へカーソルを動かす。変換中は何もしない。 */
@@ -11653,6 +11700,9 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                 override fun onCandidateListToggle() {
                     _suggestionViewStatus.update { !it }
                 }
+                override fun editKeyMode(): com.kazumaproject.tenkey.TenKey.EditKeyMode = clearEditKeyMode()
+                override fun onEditAction(action: com.kazumaproject.tenkey.TenKey.EditAction) =
+                    performClearEditAction(action)
             })
             applyKeyboardTheme(
                 skinId = keyboardSkinId,
