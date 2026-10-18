@@ -506,7 +506,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
     private var editGesture = false
     private var editMode = EditKeyMode.Off
     private var editAction: EditAction? = null
-    private var editDirection = GestureType.Tap
+    private var editDirection: GestureType = GestureType.Tap
     private var editSavedTextSize = -1f
     private val editMoveRunnable = Runnable {
         // 動かさずに長押ししたら、浮かせている間はキーボードを掴む（ほかのキーと同じ）
