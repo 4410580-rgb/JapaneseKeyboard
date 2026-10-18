@@ -1772,6 +1772,28 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                 .putBoolean("clear_keyboard_learn_v1", true)
                 .apply()
         }
+        // ユーザー辞書に「@gmail.com」を入れる（読み: あっと / じーめーる）。消されたら戻さない
+        if (!prefs.getBoolean("clear_keyboard_gmail_word_v1", false)) {
+            ioScope.launch {
+                runCatching {
+                    listOf("あっと", "じーめーる").forEach { reading ->
+                        val exists = userDictionaryRepository.searchByReadingExactMatchSuspend(reading)
+                            .any { it.word == "@gmail.com" }
+                        if (!exists) {
+                            userDictionaryRepository.insert(
+                                com.kazumaproject.markdownhelperkeyboard.user_dictionary.database.UserWord(
+                                    word = "@gmail.com",
+                                    reading = reading,
+                                    posIndex = 0,
+                                    posScore = 3000,
+                                )
+                            )
+                        }
+                    }
+                    prefs.edit().putBoolean("clear_keyboard_gmail_word_v1", true).apply()
+                }.onFailure { Timber.w(it, "Unable to add @gmail.com to the user dictionary") }
+            }
+        }
         if (prefs.getBoolean("clear_keyboard_size_reset_v1", false)) return
         appPreference.keyboard_height = 220
         appPreference.keyboard_width = 100
@@ -12113,11 +12135,8 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
 
             Key.SideKeySymbol -> {
                 vibrate()
-                // 透過キーボード: 候補が出ている間、左上のマスは候補一覧を開く矢印
-                if (clearKeyboard.isActive() && clearStripHasCandidates()) {
-                    _suggestionViewStatus.update { !it }
-                    return
-                }
+                // 透過キーボードで候補が出ている間の左上のマスは TenKey 側が受ける（候補の操作）。
+                // ここに来るのは記号キーを押したときだけ（数字テンキーの左下も記号）
                 _keyboardSymbolViewState.value = SymbolKeyboardState(
                     isShown = !_keyboardSymbolViewState.value.isShown
                 )
@@ -12312,11 +12331,8 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
 
             Key.SideKeySymbol -> {
                 vibrate()
-                // 透過キーボード: 候補が出ている間、左上のマスは候補一覧を開く矢印
-                if (clearKeyboard.isActive() && clearStripHasCandidates()) {
-                    _suggestionViewStatus.update { !it }
-                    return
-                }
+                // 透過キーボードで候補が出ている間の左上のマスは TenKey 側が受ける（候補の操作）。
+                // ここに来るのは記号キーを押したときだけ（数字テンキーの左下も記号）
                 _keyboardSymbolViewState.value = SymbolKeyboardState(
                     isShown = !_keyboardSymbolViewState.value.isShown
                 )

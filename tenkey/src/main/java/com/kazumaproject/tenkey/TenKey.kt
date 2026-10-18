@@ -224,7 +224,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         style = android.graphics.Paint.Style.FILL
     }
 
-    /** 日本語テンキーを「格子だけ」で描くかどうか。実際に効くのは日本語入力中だけ。 */
+    /** テンキーを「格子だけ」で描くかどうか。実際に効くのは日本語・数字の入力中だけ。 */
     fun setClearGridRequested(enabled: Boolean) {
         clearGridRequested = enabled
         refreshClearGrid()
@@ -238,7 +238,8 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
     }
 
     private fun refreshClearGrid() {
-        val want = clearGridRequested && currentInputMode.value == InputMode.ModeJapanese
+        val want = clearGridRequested && (currentInputMode.value == InputMode.ModeJapanese ||
+            currentInputMode.value == InputMode.ModeNumber)
         if (want == clearGridApplied) {
             if (want) applyClearGridVisuals()
             return
@@ -251,6 +252,10 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
             clearKeyLabelShadows()
             restoreSideKeys()
             lastThemeApply?.invoke()
+            // 数字テンキーで消していた数字を戻す
+            if (currentInputMode.value == InputMode.ModeNumber) {
+                handleCurrentInputModeSwitch(currentInputMode.value)
+            }
         }
         invalidate()
         onClearGridChanged?.invoke(want)
@@ -596,6 +601,8 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         const val CANDIDATE_EDGE_RATIO = 0.1f
         /** 候補スライド: 端でのスクロールの速さ（dp/ms。0.5 = 1秒に 500dp） */
         const val CANDIDATE_EDGE_SPEED_DP_PER_MS = 0.5f
+        /** 透過の数字テンキーで、数字以外の文字を見せる濃さ */
+        const val NUMBER_SKELETON_ALPHA = 0.45f
     }
 
     private fun clearGridKeys(): List<View> = binding.run {
@@ -611,19 +618,56 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         setBackgroundColor(Color.TRANSPARENT)
         // 配置は覚えているので、キー自体は描かずに格子と押下の光だけを TenKey 側で描く。
         // 文字色はあちこちで戻されるので、キーごと透明（alpha 0）にしておく。
+        // 押した所の光は TenKey 側で描くので、キーの背景自体は光らせない（数字の薄い文字と二重にしない）
         clearGridKeys().forEach { view ->
             if (view.background !is com.kazumaproject.tenkey.view.ClearKeyDrawable) {
                 view.background = com.kazumaproject.tenkey.view.ClearKeyDrawable(
+                    pressedColor = 0x00FFFFFF,
                     onPressedChanged = clearPressInvalidator
                 )
             }
-            view.alpha = 0f
+            view.alpha = clearKeyAlpha(view)
         }
+        stripDigitsFromNumberLabels()
         binding.sideKeySymbolModeContainer.setKeyBackground(
-            com.kazumaproject.tenkey.view.ClearKeyDrawable(onPressedChanged = clearPressInvalidator)
+            com.kazumaproject.tenkey.view.ClearKeyDrawable(
+                pressedColor = 0x00FFFFFF,
+                onPressedChanged = clearPressInvalidator
+            )
         )
         binding.sideKeySymbolModeContainer.alpha = 0f
         invalidate()
+    }
+
+    /** 透過の数字テンキー中か */
+    private fun isNumberClear(): Boolean =
+        clearGridApplied && currentInputMode.value == InputMode.ModeNumber
+
+    /**
+     * 透過中のキーの不透明度。日本語は全部消す。数字は 0〜9 だけ消し、
+     * 記号などの残りの文字は薄く（スケルトンで）見せる。左右の列は消す。
+     */
+    private fun clearKeyAlpha(view: View): Float {
+        if (!isNumberClear()) return 0f
+        val isCharacterKey = view === binding.keySmallLetter ||
+            (view is AppCompatButton && keyForCharacterButton(view) != null)
+        return if (isCharacterKey) NUMBER_SKELETON_ALPHA else 0f
+    }
+
+    /** 透過の数字テンキーでは、キーの文字から 0〜9 だけを取り除く */
+    private fun stripDigitsFromNumberLabels() {
+        if (!isNumberClear()) return
+        characterButtons().forEach { stripDigits(it) }
+    }
+
+    private fun stripDigits(button: AppCompatButton) {
+        val text = button.text ?: return
+        if (text.none { it in '0'..'9' }) return
+        val builder = android.text.SpannableStringBuilder(text)
+        for (i in builder.length - 1 downTo 0) {
+            if (builder[i] in '0'..'9') builder.delete(i, i + 1)
+        }
+        button.text = builder
     }
 
     private val clearPressInvalidator: () -> Unit = { invalidate() }
@@ -667,7 +711,8 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         val half = line / 2f
         val views = scalableKeyViews().filter { it.visibility == View.VISIBLE }
         views.forEach { v ->
-            if (v.alpha != 0f) v.alpha = 0f
+            val targetAlpha = clearKeyAlpha(v)
+            if (v.alpha != targetAlpha) v.alpha = targetAlpha
             val lp = v.layoutParams as? LayoutParams
             val right = v.right + (lp?.marginEnd ?: 0).toFloat()
             val bottom = v.bottom + (lp?.bottomMargin ?: 0).toFloat()
@@ -2649,7 +2694,8 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
                 binding.keySpace.layoutXPosition() + binding.keySpace.screenWidth(),
                 binding.keySpace.layoutYPosition() + binding.keySpace.screenHeight()
             ), KeyRect(
-                Key.SideKeyInputMode,
+                // 透過の数字テンキーでは左下と左下から2番目を入れ替える: 左下は記号
+                if (isNumberClear()) Key.SideKeySymbol else Key.SideKeyInputMode,
                 binding.keySwitchKeyMode.layoutXPosition(),
                 binding.keySwitchKeyMode.layoutYPosition(),
                 binding.keySwitchKeyMode.layoutXPosition() + binding.keySwitchKeyMode.screenWidth(),
@@ -2706,7 +2752,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         val right = left + container.screenWidth()
         val bottom = top + container.screenHeight()
         if (clearGridApplied) {
-            // Simeji 配置: 左列3段目は「123」
+            // Simeji 配置: 左列3段目は「123」。数字テンキーでは同じマスで日本語に戻る
             return listOf(KeyRect(Key.SideKeyNumberMode, left, top, right, bottom))
         }
         if (useThreeStateKeyboard) {
@@ -2801,6 +2847,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
             )
         }
         applyModeLetterSize(button, InputMode.ModeNumber)
+        if (isNumberClear()) stripDigits(button)
     }
 
     private fun setTextForMode(button: AppCompatButton, inputMode: InputMode) {
@@ -3036,7 +3083,11 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
             }
         }
         if (clearGridApplied) {
-            binding.keyReturn.isPressed = pressedKey.key == Key.SideKeySymbol
+            // 透過の数字テンキーでは左下も記号。押した方だけ光らせる
+            val symbolOnBottom = isNumberClear() && pressedKey.key == Key.SideKeySymbol &&
+                !isOnView(binding.keyReturn, pressedKey.initialX, pressedKey.initialY)
+            binding.keyReturn.isPressed = pressedKey.key == Key.SideKeySymbol && !symbolOnBottom
+            binding.keySwitchKeyMode.isPressed = symbolOnBottom
         }
     }
 
@@ -3505,7 +3556,12 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
     }
 
     private fun switchToNumberMode() {
-        // 透過（Simeji 配置）では左列の「123」で数字に切り替える
+        // 透過（Simeji 配置）では左列の「123」で数字に切り替える。数字テンキー中は同じマスで日本語へ戻る
+        if (isNumberClear()) {
+            _currentInputMode.update { InputMode.ModeJapanese }
+            inputModeChangedListener?.invoke(InputMode.ModeJapanese)
+            return
+        }
         if (useThreeStateKeyboard && !clearGridApplied) return
         rememberTwoStateNumberReturnTargetFromCurrentMode()
         if (useQwertyNumberWhenThreeStateOff) {
@@ -3533,7 +3589,9 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
             InputMode.ModeEnglish -> setKeysInEnglishText()
             InputMode.ModeNumber -> setKeysInNumberText()
         }
-        if (clearGridApplied && inputMode == InputMode.ModeJapanese && !isCursorMode) {
+        if (clearGridApplied && !isCursorMode &&
+            (inputMode == InputMode.ModeJapanese || inputMode == InputMode.ModeNumber)
+        ) {
             applySimejiSideKeys()
         }
     }
