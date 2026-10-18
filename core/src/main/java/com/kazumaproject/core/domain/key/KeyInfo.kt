@@ -2235,3 +2235,12 @@ sealed class KeyInfo {
 
 
 }
+
+/** 文字を指定して作るタップ・フリックの割り当て（透過の数字テンキー用） */
+class SimpleTapFlickInfo(
+    override val tap: Char?,
+    override val flickLeft: Char? = null,
+    override val flickTop: Char? = null,
+    override val flickRight: Char? = null,
+    override val flickBottom: Char? = null,
+) : KeyInfo.KeyTapFlickInfo()

@@ -607,10 +607,79 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         invalidate()
     }
 
+    // ---- 透過の数字テンキー: ← → の位置は「:」「-」を打つキー ----
+    private var charKeyView: View? = null
+    private var charKeyChar: Char? = null
+    private val charKeyMoveRunnable = Runnable {
+        // 浮かせている間に動かさず長押ししたら、ほかのキーと同じくキーボードを掴む
+        if (charKeyView == null || moveDragListener?.canMove() != true) return@Runnable
+        endCharKeyGesture()
+        startMoveDrag()
+    }
+
+    private fun handleCharKeyGesture(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                moveDownRawX = ev.rawX
+                moveDownRawY = ev.rawY
+                moveDragging = false
+                moveGestureIsDrag = false
+                lineMoveCandidate = false
+                charKeyView?.isPressed = true
+                flickListener?.onFlick(GestureType.Down, Key.KeyDakutenSmall, null)
+                postDelayed(charKeyMoveRunnable, (longPressTimeout * 8 / 10).coerceAtLeast(250L))
+                invalidate()
+            }
+
+            MotionEvent.ACTION_MOVE -> {
+                val slop = ViewConfiguration.get(context).scaledTouchSlop
+                if (kotlin.math.abs(ev.rawX - moveDownRawX) > slop ||
+                    kotlin.math.abs(ev.rawY - moveDownRawY) > slop
+                ) {
+                    removeCallbacks(charKeyMoveRunnable)
+                }
+            }
+
+            MotionEvent.ACTION_UP -> {
+                val c = charKeyChar
+                endCharKeyGesture()
+                // 数字テンキーの括弧キーと同じ道筋で1文字入れる（フリック扱い: 連続タップの文字送りなし）
+                c?.let { flickListener?.onFlick(GestureType.FlickTop, Key.KeyDakutenSmall, it) }
+            }
+
+            MotionEvent.ACTION_CANCEL -> endCharKeyGesture()
+        }
+        return true
+    }
+
+    private fun endCharKeyGesture() {
+        removeCallbacks(charKeyMoveRunnable)
+        charKeyView?.isPressed = false
+        charKeyView = null
+        charKeyChar = null
+        invalidate()
+    }
+
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         if (!clearGridApplied || moveDragListener == null) return super.dispatchTouchEvent(ev)
         if (candidateGesture) return handleCandidateGesture(ev)
         if (editGesture) return handleEditGesture(ev)
+        if (charKeyView != null) return handleCharKeyGesture(ev)
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN && isNumberClear() && !isCursorMode) {
+            val target = when {
+                isOnView(binding.keySoftLeft, ev.rawX, ev.rawY) -> binding.keySoftLeft to ':'
+                isOnView(binding.keyMoveCursorRight, ev.rawX, ev.rawY) -> binding.keyMoveCursorRight to '-'
+                else -> null
+            }
+            if (target != null) {
+                stopLineMove()
+                removeCallbacks(moveStartRunnable)
+                removeCallbacks(toggleFloatingRunnable)
+                charKeyView = target.first
+                charKeyChar = target.second
+                return handleCharKeyGesture(ev)
+            }
+        }
         if (ev.actionMasked == MotionEvent.ACTION_DOWN && !isCursorMode &&
             currentInputMode.value == InputMode.ModeJapanese &&
             isOnView(binding.keySmallLetter, ev.rawX, ev.rawY)
@@ -772,6 +841,10 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         )
         binding.sideKeySymbolModeContainer.alpha = clearKeyAlpha(binding.sideKeySymbolModeContainer)
         if (!isCursorMode) applySimejiSideKeys()
+        if (isNumberClear()) {
+            characterButtons().forEach { setNumberClearTextFor(it) }
+            setNumberSmallKeyPresentation()
+        }
         invalidate()
     }
 
@@ -810,8 +883,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
     private var lastPreviousKeyEnabled: Boolean = true
 
     /**
-     * Simeji と同じ左列: 記号 / ← / 123 / あA。
-     * 数字テンキーでは下の2マスを入れ替える: 記号 / ← / あいう（日本語へ） / 記号
+     * Simeji と同じ左列: 記号 / ← / 123 / あA。数字テンキーは Simeji の数字画面の左右の列。
      */
     private fun applySimejiSideKeys() {
         binding.keyReturn.isEnabled = true
@@ -828,8 +900,21 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
             )
         )
         if (number) {
-            KeyboardFontGlyphDrawable.setImageDrawable(
-                binding.keySwitchKeyMode, cachedSymbolDrawable, keyboardFontSnapshot
+            // Simeji の数字テンキー: 左列 記号 / : / ↶（ひらがなへ） / あA（QWERTY へ）、右列 ⌫ / - / 空白 / 改行
+            val color = androidx.core.content.ContextCompat.getColor(
+                context, com.kazumaproject.core.R.color.keyboard_icon_color
+            )
+            binding.keySoftLeft.setImageDrawable(
+                com.kazumaproject.tenkey.view.ClearLabelDrawable(":", color = color)
+            )
+            binding.keyMoveCursorRight.setImageDrawable(
+                com.kazumaproject.tenkey.view.ClearLabelDrawable("-", color = color)
+            )
+            binding.keySwitchKeyMode.setImageDrawable(
+                com.kazumaproject.tenkey.view.ClearLabelDrawable("あA", color = color)
+            )
+            binding.sideKeySymbolModeContainer.setSymbolImageDrawable(
+                com.kazumaproject.tenkey.view.ClearLabelDrawable("↶", color = color)
             )
         }
     }
@@ -2841,8 +2926,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
                 binding.keySpace.layoutXPosition() + binding.keySpace.screenWidth(),
                 binding.keySpace.layoutYPosition() + binding.keySpace.screenHeight()
             ), KeyRect(
-                // 透過の数字テンキーでは左下と左下から2番目を入れ替える: 左下は記号
-                if (isNumberClear()) Key.SideKeySymbol else Key.SideKeyInputMode,
+                Key.SideKeyInputMode,
                 binding.keySwitchKeyMode.layoutXPosition(),
                 binding.keySwitchKeyMode.layoutYPosition(),
                 binding.keySwitchKeyMode.layoutXPosition() + binding.keySwitchKeyMode.screenWidth(),
@@ -2975,7 +3059,21 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         applyModeLetterSize(button, InputMode.ModeEnglish)
     }
 
+    /** 透過の数字テンキーのキーの文字（数字は出さない。下の段の 0 と # のキーはフリックの文字だけ見せる） */
+    private fun setNumberClearTextFor(button: AppCompatButton) {
+        val label: CharSequence = when (button.id) {
+            R.id.key_11 -> "=\n+   %"
+            R.id.key_12 -> "^\n. # ,"
+            else -> ""
+        }
+        button.text = label
+    }
+
     private fun setNumberTextFor(button: AppCompatButton) {
+        if (isNumberClear()) {
+            setNumberClearTextFor(button)
+            return
+        }
         val keyInfo = keyForCharacterButton(button)
             ?.let { keyMap.getKeyInfoNumber(it, false) as? KeyInfo.KeyTapFlickInfo }
         if (isNumberFlickGuideEnabled && keyInfo != null) {
@@ -3070,6 +3168,15 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
      * IME 側で候補表示などを更新した後も、旧アイコンを直接設定せずこのメソッドを使う。
      */
     fun setNumberSmallKeyPresentation() {
+        if (isNumberClear()) {
+            val color = androidx.core.content.ContextCompat.getColor(
+                context, com.kazumaproject.core.R.color.keyboard_icon_color
+            )
+            binding.keySmallLetter.setImageDrawable(
+                com.kazumaproject.tenkey.view.ClearLabelDrawable("@", top = "~", left = "&", right = "…", color = color)
+            )
+            return
+        }
         KeyboardFontGlyphDrawable.setImageDrawable(
             binding.keySmallLetter,
             if (isNumberFlickGuideEnabled) {
@@ -3133,15 +3240,43 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         }
     }
 
-    private fun resolveTextSelection(
-        key: Key,
-        gestureType: GestureType,
-    ): FlickTextSelection {
-        val keyInfo = currentInputMode.value.next(
+    /**
+     * 透過の数字テンキーは Simeji と同じ割り当て。1〜9 はフリックしても同じ数字、
+     * 下の段は @（左 & 上 ~ 右 …）/ 0（左 + 上 = 右 %）/ #（左 . 上 ^ 右 ,）。
+     */
+    private fun numberClearKeyInfo(key: Key): KeyInfo? {
+        fun digit(c: Char) = com.kazumaproject.core.domain.key.SimpleTapFlickInfo(c, c, c, c, c)
+        return when (key) {
+            Key.KeyA -> digit('1')
+            Key.KeyKA -> digit('2')
+            Key.KeySA -> digit('3')
+            Key.KeyTA -> digit('4')
+            Key.KeyNA -> digit('5')
+            Key.KeyHA -> digit('6')
+            Key.KeyMA -> digit('7')
+            Key.KeyYA -> digit('8')
+            Key.KeyRA -> digit('9')
+            Key.KeyWA -> com.kazumaproject.core.domain.key.SimpleTapFlickInfo('0', '+', '=', '%')
+            Key.KeyKutouten -> com.kazumaproject.core.domain.key.SimpleTapFlickInfo('#', '.', '^', ',')
+            Key.KeyDakutenSmall -> com.kazumaproject.core.domain.key.SimpleTapFlickInfo('@', '&', '~', '…')
+            else -> null
+        }
+    }
+
+    private fun keyInfoFor(key: Key): KeyInfo {
+        if (isNumberClear()) numberClearKeyInfo(key)?.let { return it }
+        return currentInputMode.value.next(
             keyMap = keyMap,
             key = key,
             isGojuon = false
         )
+    }
+
+    private fun resolveTextSelection(
+        key: Key,
+        gestureType: GestureType,
+    ): FlickTextSelection {
+        val keyInfo = keyInfoFor(key)
         return resolveTextSelection(keyInfo, gestureType)
     }
 
@@ -3167,11 +3302,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
     }
 
     private fun dispatchResolvedGesture(key: Key, gestureType: GestureType) {
-        val keyInfo = currentInputMode.value.next(
-            keyMap = keyMap,
-            key = key,
-            isGojuon = false
-        )
+        val keyInfo = keyInfoFor(key)
         val selection = resolveTextSelection(keyInfo, gestureType)
         flickTextPreviewEmitter.commit(selection) {
             when (keyInfo) {
@@ -3184,9 +3315,10 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
                     if (key == Key.SideKeyInputMode) {
                         val listener = moveDragListener
                         if (clearGridApplied && listener != null &&
-                            currentInputMode.value == InputMode.ModeJapanese
+                            (currentInputMode.value == InputMode.ModeJapanese ||
+                                currentInputMode.value == InputMode.ModeNumber)
                         ) {
-                            // 透過のひらがなテンキーでは、左下は QWERTY との切り替えだけ
+                            // 透過のひらがな・数字テンキーでは、左下は QWERTY との切り替えだけ
                             listener.onQwertySwitch()
                         } else {
                             handleClickInputModeSwitch()
@@ -3238,11 +3370,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
             }
         }
         if (clearGridApplied) {
-            // 透過の数字テンキーでは左下も記号。押した方だけ光らせる
-            val symbolOnBottom = isNumberClear() && pressedKey.key == Key.SideKeySymbol &&
-                !isOnView(binding.keyReturn, pressedKey.initialX, pressedKey.initialY)
-            binding.keyReturn.isPressed = pressedKey.key == Key.SideKeySymbol && !symbolOnBottom
-            binding.keySwitchKeyMode.isPressed = symbolOnBottom
+            binding.keyReturn.isPressed = pressedKey.key == Key.SideKeySymbol
         }
     }
 
@@ -3277,6 +3405,8 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
 
     /** Called when a long‐press is detected; show all related popups **/
     private fun onLongPressed() {
+        // 透過の数字テンキーでは長押しの一覧は出さない（文字の割り当てが違うため）
+        if (isNumberClear()) return
         val button = getButtonFromKey(pressedKey.key)
         button?.let {
             if (it is AppCompatButton) {
@@ -3369,8 +3499,42 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         popupWindowCenter.hide()
     }
 
+    /**
+     * 透過の数字テンキー中の押している間の表示: キーの文字は変えず、フリックした文字だけポップアップに出す。
+     */
+    private fun showNumberClearPopup(gestureType: GestureType) {
+        val anchor = getButtonFromKey(pressedKey.key) as? View ?: return
+        anchor.isPressed = true
+        val c = (keyInfoFor(pressedKey.key) as? KeyInfo.KeyTapFlickInfo)?.let { info ->
+            when (gestureType) {
+                GestureType.FlickLeft -> info.flickLeft
+                GestureType.FlickTop -> info.flickTop
+                GestureType.FlickRight -> info.flickRight
+                GestureType.FlickBottom -> info.flickBottom
+                else -> null
+            }
+        }
+        if (c == null) {
+            popupWindowActive.hide()
+            return
+        }
+        popTextActive.text = c.toString()
+        val scale = popupViewStyle.sizeScalePercent
+        when (gestureType) {
+            GestureType.FlickLeft -> popupWindowActive.setPopUpWindowFlickLeft(context, bubbleViewActive, anchor, scale)
+            GestureType.FlickTop -> popupWindowActive.setPopUpWindowFlickTop(context, bubbleViewActive, anchor, scale)
+            GestureType.FlickRight -> popupWindowActive.setPopUpWindowFlickRight(context, bubbleViewActive, anchor, scale)
+            GestureType.FlickBottom -> popupWindowActive.setPopUpWindowFlickBottom(context, bubbleViewActive, anchor, scale)
+            else -> popupWindowActive.hide()
+        }
+    }
+
     /** Called during a “tap” gesture in an ongoing move event **/
     private fun setTapInActionMove() {
+        if (isNumberClear()) {
+            showNumberClearPopup(GestureType.Tap)
+            return
+        }
         if (skinGuide?.isShowing == true) {
             skinGuide?.select(com.kazumaproject.core.ui.skin.PopupDirection.CENTER)
             return
@@ -3415,6 +3579,10 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
     /** Called during a “flick” gesture in an ongoing move event **/
     private fun setFlickInActionMove(gestureType: GestureType) {
         longPressJob?.cancel()
+        if (isNumberClear()) {
+            showNumberClearPopup(gestureType)
+            return
+        }
         if (skinGuide?.isShowing == true) {
             val direction = when (gestureType) {
                 GestureType.FlickLeft -> com.kazumaproject.core.ui.skin.PopupDirection.LEFT
