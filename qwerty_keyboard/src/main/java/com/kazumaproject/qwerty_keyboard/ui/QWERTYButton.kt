@@ -89,9 +89,11 @@ class QWERTYButton @JvmOverloads constructor(
         super.onDraw(canvas)
 
         // topRightCharがnullでなければ文字を描画する
+        // 右上の文字はキーの端から少し内側に置く（端に寄せるとはみ出して見づらい）
+        val guideInset = maxOf(6f * resources.displayMetrics.density, width * 0.18f)
         topRightChar?.toString()?.let { charText ->
             // 描画位置を計算 (ボタンの右上、少し内側)
-            val x = (width - paddingRight).toFloat()
+            val x = width - paddingRight - guideInset
             val y = paddingTop.toFloat() + topRightPaint.textSize
 
             // Canvasに文字を描画
@@ -99,7 +101,7 @@ class QWERTYButton @JvmOverloads constructor(
         }
 
         bottomRightChar?.toString()?.let { charText ->
-            val x = (width - paddingRight).toFloat()
+            val x = width - paddingRight - guideInset
             val y = height - paddingBottom.toFloat() - topRightPaint.fontMetrics.descent
             canvas.drawText(charText, x, y, topRightPaint)
         }

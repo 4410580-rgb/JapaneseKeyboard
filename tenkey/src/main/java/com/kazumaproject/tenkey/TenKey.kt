@@ -858,7 +858,14 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
      */
     @Suppress("UNUSED_PARAMETER")
     private fun clearKeyAlpha(view: View): Float =
-        if (isNumberClear()) NUMBER_SKELETON_ALPHA else 0f
+        if (clearGridApplied && labelsMode == InputMode.ModeNumber) NUMBER_SKELETON_ALPHA else 0f
+
+    /**
+     * キーの文字をどの入力モードで書き終えたか。モードの値が先に変わり、文字の書き換えが
+     * 少し遅れて走るので、その間にひらがなの文字が薄く見えてしまう（チラつく）のを防ぐ。
+     * 数字の文字を書き終えるまではキーを透明のままにする。
+     */
+    private var labelsMode: InputMode = InputMode.ModeJapanese
 
     /** 透過の数字テンキーでは、キーの文字から 0〜9 だけを取り除く */
     private fun stripDigitsFromNumberLabels() {
@@ -3882,6 +3889,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         // 透過（Simeji 配置）では左列の「123」で数字に切り替える。数字テンキー中は同じマスで日本語へ戻る
         if (isNumberClear()) {
             _currentInputMode.update { InputMode.ModeJapanese }
+            applyInputModeNow(InputMode.ModeJapanese)
             inputModeChangedListener?.invoke(InputMode.ModeJapanese)
             return
         }
@@ -3892,7 +3900,23 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
             return
         }
         _currentInputMode.update { InputMode.ModeNumber }
+        applyInputModeNow(InputMode.ModeNumber)
         inputModeChangedListener?.invoke(InputMode.ModeNumber)
+    }
+
+    /**
+     * 切り替えた直後のコマで、キーの文字と格子を新しいモードにそろえる
+     * （普段は少し遅れて走る collector と同じ処理。後で collector が走っても同じ結果になる）。
+     */
+    private fun applyInputModeNow(inputMode: InputMode) {
+        handleCurrentInputModeSwitch(inputMode)
+        binding.keySwitchKeyMode.setInputMode(
+            inputMode = inputMode,
+            isGojuon = false,
+            useThreeStateKeyboard = useThreeStateKeyboard,
+            twoStateNumberReturnTarget = twoStateNumberReturnTarget
+        )
+        refreshClearGrid()
     }
 
     private fun rememberTwoStateNumberReturnTargetFromCurrentMode() {
@@ -3917,6 +3941,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         ) {
             applySimejiSideKeys()
         }
+        labelsMode = inputMode
     }
 
     private fun setKeysCursorMoveMode() {

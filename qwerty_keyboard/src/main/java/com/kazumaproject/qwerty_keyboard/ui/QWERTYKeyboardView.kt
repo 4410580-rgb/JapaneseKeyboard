@@ -863,6 +863,8 @@ class QWERTYKeyboardView @JvmOverloads constructor(
                 keyAtMark.isVisible = true
                 keyAtMark.text = simejiQuoteChar.toString()
                 keyA.setMarginStart(keyIndentSmallDp)
+                keyL.setMarginEnd(keyHorizontalGapDp)
+                keyAtMark.setMarginStart(keyHorizontalGapDp)
                 keyAtMark.setMarginEnd(keyIndentSmallDp)
             }
         }
