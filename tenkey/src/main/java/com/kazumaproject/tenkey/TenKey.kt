@@ -805,8 +805,6 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         const val CANDIDATE_EDGE_RATIO = 0.1f
         /** 候補スライド: 端でのスクロールの速さ（dp/ms。0.5 = 1秒に 500dp） */
         const val CANDIDATE_EDGE_SPEED_DP_PER_MS = 0.5f
-        /** 透過の数字テンキーで、数字以外の文字を見せる濃さ */
-        const val NUMBER_SKELETON_ALPHA = 0.45f
     }
 
     private fun clearGridKeys(): List<View> = binding.run {
@@ -832,7 +830,6 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
             }
             view.alpha = clearKeyAlpha(view)
         }
-        stripDigitsFromNumberLabels()
         binding.sideKeySymbolModeContainer.setKeyBackground(
             com.kazumaproject.tenkey.view.ClearKeyDrawable(
                 pressedColor = 0x00FFFFFF,
@@ -856,9 +853,13 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
      * 透過中のキーの不透明度。日本語は全部消す。数字は 0〜9 だけ消し、
      * 記号などの残りの文字と左右の列は薄く（スケルトンで）見せる。
      */
+    /** 透過中はキー自体は描かない（数字テンキーの表示するマスは TenKey が塗りと文字を描く） */
     @Suppress("UNUSED_PARAMETER")
-    private fun clearKeyAlpha(view: View): Float =
-        if (clearGridApplied && labelsMode == InputMode.ModeNumber) NUMBER_SKELETON_ALPHA else 0f
+    private fun clearKeyAlpha(view: View): Float = 0f
+
+    /** 数字テンキーの文字を書き終えて、数字テンキーとして描いてよいか */
+    private fun isNumberClearRendered(): Boolean =
+        clearGridApplied && labelsMode == InputMode.ModeNumber
 
     /**
      * キーの文字をどの入力モードで書き終えたか。モードの値が先に変わり、文字の書き換えが
@@ -939,11 +940,85 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         binding.sideKeySymbolModeContainer.alpha = 1f
     }
 
+    // ---- 透過の数字テンキー: 覚えていない5つのマスと「ひらがなへ」のマスだけ塗って文字を出す ----
+    // 色は Anthropic の公式配色: 塗り Dark #141413、文字 Light #faf9f5。
+    // ひらがなへのマスは格子の Orange #d97757 と重ならないよう、一段濃いオレンジにする
+    private val numberCellPaint = android.graphics.Paint().apply { color = 0xFF141413.toInt() }
+    private val numberReturnCellPaint = android.graphics.Paint().apply { color = 0xFFB4532F.toInt() }
+    private val numberCellPressedPaint = android.graphics.Paint().apply { color = 0x66FAF9F5 }
+    private val numberLabelPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        textAlign = android.graphics.Paint.Align.CENTER
+    }
+
+    private class NumberCell(
+        val view: () -> View,
+        val center: String,
+        val top: String? = null,
+        val left: String? = null,
+        val right: String? = null,
+        val isReturn: Boolean = false,
+    )
+
+    private val numberCells: List<NumberCell> by lazy {
+        listOf(
+            NumberCell({ binding.keySoftLeft }, ":"),
+            NumberCell({ binding.keyMoveCursorRight }, "-"),
+            NumberCell({ binding.keySmallLetter }, "@", top = "~", left = "&", right = "…"),
+            NumberCell({ binding.key11 }, "0", top = "=", left = "+", right = "%"),
+            NumberCell({ binding.key12 }, "#", top = "^", left = ".", right = ","),
+            NumberCell({ binding.sideKeySymbolModeContainer }, "あ", isReturn = true),
+        )
+    }
+
+    private fun cellRect(v: View): android.graphics.RectF {
+        val lp = v.layoutParams as? LayoutParams
+        return android.graphics.RectF(
+            v.left - (lp?.marginStart ?: 0).toFloat(),
+            v.top - (lp?.topMargin ?: 0).toFloat(),
+            v.right + (lp?.marginEnd ?: 0).toFloat(),
+            v.bottom + (lp?.bottomMargin ?: 0).toFloat(),
+        )
+    }
+
+    private fun drawNumberCells(canvas: android.graphics.Canvas) {
+        numberCells.forEach { cell ->
+            val v = cell.view()
+            if (v.visibility != View.VISIBLE) return@forEach
+            val r = cellRect(v)
+            canvas.drawRect(r, if (cell.isReturn) numberReturnCellPaint else numberCellPaint)
+            val pressed = if (v is com.kazumaproject.tenkey.view.SideKeySymbolModeContainerView) {
+                v.isAnyKeyPressed
+            } else {
+                v.isPressed
+            }
+            if (pressed) canvas.drawRect(r, numberCellPressedPaint)
+            numberLabelPaint.color = if (cell.isReturn) 0xFF141413.toInt() else 0xFFFAF9F5.toInt()
+            // 真ん中に大きく、フリックの文字は上・左・右に小さく（同じ大きさ・同じ間隔で並べる）
+            val big = minOf(r.height() * 0.36f, r.width() * 0.30f)
+            val small = big * 0.62f
+            val cx = r.centerX()
+            val cy = r.centerY()
+            fun label(text: String, x: Float, y: Float, size: Float) {
+                numberLabelPaint.textSize = size
+                val fm = numberLabelPaint.fontMetrics
+                canvas.drawText(text, x, y - (fm.ascent + fm.descent) / 2f, numberLabelPaint)
+            }
+            label(cell.center, cx, cy, big)
+            cell.top?.let { label(it, cx, cy - big * 1.0f, small) }
+            cell.left?.let { label(it, cx - big * 1.1f, cy, small) }
+            cell.right?.let { label(it, cx + big * 1.1f, cy, small) }
+        }
+    }
+
+    private fun isNumberCellView(v: View): Boolean =
+        isNumberClearRendered() && numberCells.any { it.view() === v }
+
     override fun dispatchDraw(canvas: android.graphics.Canvas) {
         super.dispatchDraw(canvas)
         if (!clearGridApplied) return
         val line = resources.displayMetrics.density.coerceAtLeast(1f)
         val half = line / 2f
+        if (isNumberClearRendered()) drawNumberCells(canvas)
         val views = scalableKeyViews().filter { it.visibility == View.VISIBLE }
         views.forEach { v ->
             val targetAlpha = clearKeyAlpha(v)
@@ -958,7 +1033,8 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
             } else {
                 v.isPressed
             }
-            if (pressed) canvas.drawRect(left, top, right, bottom, clearPressedPaint)
+            // 塗ったマスは drawNumberCells で光らせている
+            if (pressed && !isNumberCellView(v)) canvas.drawRect(left, top, right, bottom, clearPressedPaint)
         }
         if (candidateOverlay) drawCandidateDim(canvas)
         drawCenterGrid(canvas, half)
