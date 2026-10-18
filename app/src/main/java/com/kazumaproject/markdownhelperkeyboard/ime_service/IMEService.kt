@@ -1803,6 +1803,15 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         // ユーザー辞書に入れておく語（一度だけ。消されたら戻さない）
         addUserWordsOnce(prefs, "clear_keyboard_gmail_word_v1", "@gmail.com", listOf("あっと", "じーめーる"))
         addUserWordsOnce(prefs, "clear_keyboard_claude_word_v1", "Claude", listOf("くろーど"))
+        // QWERTY もテンキーと同じ高さ・幅・位置にする（左下の切り替えキーの位置を揃えるため）
+        if (!prefs.getBoolean("clear_keyboard_qwerty_size_v1", false)) {
+            appPreference.qwerty_keyboard_height = appPreference.keyboard_height ?: 220
+            appPreference.qwerty_keyboard_width = appPreference.keyboard_width ?: 100
+            appPreference.qwerty_keyboard_position = appPreference.keyboard_position ?: true
+            appPreference.qwerty_keyboard_vertical_margin_bottom =
+                appPreference.keyboard_vertical_margin_bottom ?: 0
+            prefs.edit().putBoolean("clear_keyboard_qwerty_size_v1", true).apply()
+        }
         if (prefs.getBoolean("clear_keyboard_size_reset_v1", false)) return
         appPreference.keyboard_height = 220
         appPreference.keyboard_width = 100
@@ -10567,6 +10576,41 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         )
     }
 
+    /** 透過のひらがなテンキーから QWERTY を開いたか（QWERTY の左下で、ひらがなテンキーに戻る） */
+    private var qwertyOpenedFromClearTenkey = false
+
+    /** 透過のひらがなテンキーの左下: 入力中の文字を確定してから QWERTY（英字）を開く */
+    private fun switchClearTenkeyToQwerty(mainView: MainLayoutBinding) {
+        val insertString = inputString.value
+        if (insertString.isNotEmpty() || isHenkan.get()) {
+            handleNonEmptyInputEnterKey(suggestionAdapter?.suggestions.orEmpty(), mainView, insertString)
+        }
+        _tenKeyQWERTYMode.update { TenKeyQWERTYMode.TenKeyQWERTY }
+        currentInputModeForSession = InputMode.ModeEnglish
+        setCurrentQwertyRomajiModeForSession(false)
+        setQwertySwitchNumberKeyReturnSource(RestartInputModeQwertyReturnSource.TenKeyDefault)
+        qwertyOpenedFromClearTenkey = true
+        updateQwertyOnActiveSurface {
+            resetQWERTYKeyboard(editorEnterLabel(japanese = false))
+        }
+        renderCurrentKeyboardStateOnActiveSurface()
+        setKeyboardSizeSwitchKeyboard(mainView)
+        previousTenKeyQWERTYMode = TenKeyQWERTYMode.Default
+    }
+
+    /** QWERTY の左下: 透過のひらがなテンキーへ戻る */
+    private fun returnClearTenkeyFromQwerty(mainView: MainLayoutBinding, insertString: String) {
+        qwertyOpenedFromClearTenkey = false
+        updateQwertyOnActiveSurface { setDefaultView() }
+        returnDefaultQwertyToTenkeyInputMode(
+            inputMode = InputMode.ModeJapanese,
+            mainView = mainView,
+            insertString = insertString
+        )
+        renderCurrentKeyboardStateOnActiveSurface()
+        updateFloatingKeyboardSizeForMode(qwertyMode.value)
+    }
+
     private fun switchTenkeyEnglishToQwertyIfNeeded(
         inputMode: InputMode,
         mainView: MainLayoutBinding,
@@ -11703,6 +11747,9 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                 override fun editKeyMode(): com.kazumaproject.tenkey.TenKey.EditKeyMode = clearEditKeyMode()
                 override fun onEditAction(action: com.kazumaproject.tenkey.TenKey.EditAction) =
                     performClearEditAction(action)
+                override fun onQwertySwitch() {
+                    mainLayoutBinding?.let { switchClearTenkeyToQwerty(it) }
+                }
             })
             applyKeyboardTheme(
                 skinId = keyboardSkinId,
@@ -24703,6 +24750,10 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
 
                         QWERTYKey.QWERTYKeySwitchNumberKey -> {
                             if (activeSplitSlot?.let(splitInputs::get)?.selection?.type == KeyboardType.QWERTY) return
+                            if (qwertyOpenedFromClearTenkey) {
+                                returnClearTenkeyFromQwerty(mainView, insertString)
+                                return
+                            }
                             if (qwertyNumberOpenedFromTenkeyTwoStateNumberKey) {
                                 returnTenkeyFromTwoStateQwertyNumber(
                                     mainView = mainView,

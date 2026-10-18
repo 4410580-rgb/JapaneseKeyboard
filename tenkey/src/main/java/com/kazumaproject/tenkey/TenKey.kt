@@ -291,6 +291,8 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         fun editKeyMode(): EditKeyMode = EditKeyMode.Off
         /** 編集キーの操作 */
         fun onEditAction(action: EditAction) {}
+        /** ひらがなテンキーの左下: QWERTY に切り替える */
+        fun onQwertySwitch() {}
     }
 
     enum class EditKeyMode { Off, Normal, Selection }
@@ -3189,7 +3191,15 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
                         char = null
                     )
                     if (key == Key.SideKeyInputMode) {
-                        handleClickInputModeSwitch()
+                        val listener = moveDragListener
+                        if (clearGridApplied && listener != null &&
+                            currentInputMode.value == InputMode.ModeJapanese
+                        ) {
+                            // 透過のひらがなテンキーでは、左下は QWERTY との切り替えだけ
+                            listener.onQwertySwitch()
+                        } else {
+                            handleClickInputModeSwitch()
+                        }
                     } else if (key == Key.SideKeyNumberMode) {
                         switchToNumberMode()
                     }

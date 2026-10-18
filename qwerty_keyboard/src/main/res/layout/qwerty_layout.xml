@@ -7,28 +7,28 @@
         android:layout_width="0dp"
         android:layout_height="0dp"
         android:orientation="horizontal"
-        app:layout_constraintGuide_percent="0.20" />
+        app:layout_constraintGuide_percent="0.1875" />
 
     <androidx.constraintlayout.widget.Guideline
         android:id="@+id/guideline_q_row"
         android:layout_width="0dp"
         android:layout_height="0dp"
         android:orientation="horizontal"
-        app:layout_constraintGuide_percent="0.40" />
+        app:layout_constraintGuide_percent="0.375" />
 
     <androidx.constraintlayout.widget.Guideline
         android:id="@+id/guideline_a_row"
         android:layout_width="0dp"
         android:layout_height="0dp"
         android:orientation="horizontal"
-        app:layout_constraintGuide_percent="0.60" />
+        app:layout_constraintGuide_percent="0.5625" />
 
     <androidx.constraintlayout.widget.Guideline
         android:id="@+id/guideline_z_row"
         android:layout_width="0dp"
         android:layout_height="0dp"
         android:orientation="horizontal"
-        app:layout_constraintGuide_percent="0.80" />
+        app:layout_constraintGuide_percent="0.75" />
 
 
     <com.kazumaproject.qwerty_keyboard.ui.QWERTYButton
@@ -820,6 +820,8 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toStartOf="@+id/key_123"
         app:layout_constraintHorizontal_weight="0.75"
+        app:layout_constraintWidth_default="percent"
+        app:layout_constraintWidth_percent="0.2"
         app:layout_constraintStart_toEndOf="@id/switch_romaji_english"
         app:layout_constraintTop_toBottomOf="@id/guideline_z_row" />
 

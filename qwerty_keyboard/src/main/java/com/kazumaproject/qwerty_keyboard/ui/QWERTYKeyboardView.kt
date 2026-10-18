@@ -3300,10 +3300,12 @@ class QWERTYKeyboardView @JvmOverloads constructor(
 
         if (state && isNumberKeysShow) {
             numberKeys.forEach { it.isVisible = true }
-            constraintSet.setGuidelinePercent(R.id.guideline_number_row, 0.20f)
-            constraintSet.setGuidelinePercent(R.id.guideline_q_row, 0.40f)
-            constraintSet.setGuidelinePercent(R.id.guideline_a_row, 0.60f)
-            constraintSet.setGuidelinePercent(R.id.guideline_z_row, 0.80f)
+            // 一番下の段はテンキーの1段と同じ 1/4 にする（左下の切り替えキーの位置を揃える）。
+            // 残りの 3/4 を数字・Q・A・Z の4段で分ける
+            constraintSet.setGuidelinePercent(R.id.guideline_number_row, 0.1875f)
+            constraintSet.setGuidelinePercent(R.id.guideline_q_row, 0.375f)
+            constraintSet.setGuidelinePercent(R.id.guideline_a_row, 0.5625f)
+            constraintSet.setGuidelinePercent(R.id.guideline_z_row, 0.75f)
             qRowKeys.forEach { key ->
                 constraintSet.connect(
                     key.id,
