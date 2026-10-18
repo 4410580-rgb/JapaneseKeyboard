@@ -6676,6 +6676,8 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                     showEmojiKey = qwertyShowEmojiButtonPreference ?: false
                 )
                 qwertyView.setRomajiEnglishSwitchKeyTextWithStyle(true)
+                // 英字の QWERTY は Simeji と同じ配列にする（数字は Q〜P の上フリック）
+                qwertyView.setSimejiLayout(true)
                 qwertyView.updateSymbolKeymapState(qwertyShowKeymapSymbolsPreference ?: false)
                 qwertyView.updateNumberKeyState(qwertyShowNumberButtonsPreference ?: false)
                 qwertyView.setPopUpViewState(qwertyShowPopupWindowPreference ?: true)
@@ -24516,6 +24518,8 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                 showEmojiKey = qwertyShowEmojiButtonPreference ?: false
             )
             setRomajiEnglishSwitchKeyTextWithStyle(true)
+            // 英字の QWERTY は Simeji と同じ配列にする（数字は Q〜P の上フリック）
+            setSimejiLayout(true)
             updateSymbolKeymapState(qwertyShowKeymapSymbolsPreference ?: false)
             updateNumberKeyState(qwertyShowNumberButtonsPreference ?: false)
             setPopUpViewState(qwertyShowPopupWindowPreference ?: true)

@@ -797,6 +797,7 @@ class QWERTYKeyboardView @JvmOverloads constructor(
                 displayOrHideNumberKeys(false)
             }
         }
+        applySimejiRowLayout(mode)
         // マージン変更を反映するために再レイアウトを要求
         requestLayout()
     }
@@ -804,6 +805,97 @@ class QWERTYKeyboardView @JvmOverloads constructor(
     /**
      * ★ すべてのキーの基本マージン（縦、および横の隙間）を適用する
      */
+    // ---- Simeji 配列（自分用の改造）: 英字のときだけ ----
+    // 数字の段なし。Q〜P の上フリックで 1〜0、A 段は10キー（最後が "）、下の段は あA / 123 / , / 空白 / . / 改行
+    private var simejiLayout = false
+    private var requestedNumberKeysShow = false
+    private var requestedFlickUpDetection = false
+    private var requestedGlideInputMode = false
+
+    private val simejiUpChars: Map<QWERTYKey, Char> = mapOf(
+        QWERTYKey.QWERTYKeyQ to '1', QWERTYKey.QWERTYKeyW to '2', QWERTYKey.QWERTYKeyE to '3',
+        QWERTYKey.QWERTYKeyR to '4', QWERTYKey.QWERTYKeyT to '5', QWERTYKey.QWERTYKeyY to '6',
+        QWERTYKey.QWERTYKeyU to '7', QWERTYKey.QWERTYKeyI to '8', QWERTYKey.QWERTYKeyO to '9',
+        QWERTYKey.QWERTYKeyP to '0',
+        QWERTYKey.QWERTYKeyA to '@', QWERTYKey.QWERTYKeyS to '#', QWERTYKey.QWERTYKeyD to '%',
+        QWERTYKey.QWERTYKeyF to '・', QWERTYKey.QWERTYKeyG to '*', QWERTYKey.QWERTYKeyH to '+',
+        QWERTYKey.QWERTYKeyJ to '-', QWERTYKey.QWERTYKeyK to '_', QWERTYKey.QWERTYKeyL to '[',
+        QWERTYKey.QWERTYKeyAtMark to ']',
+        QWERTYKey.QWERTYKeyZ to '/', QWERTYKey.QWERTYKeyX to '(', QWERTYKey.QWERTYKeyC to ')',
+        QWERTYKey.QWERTYKeyV to ':', QWERTYKey.QWERTYKeyB to ';', QWERTYKey.QWERTYKeyN to '~',
+        QWERTYKey.QWERTYKeyM to '^',
+        QWERTYKey.QWERTYKeyTouten to '!', QWERTYKey.QWERTYKeyKuten to '?',
+    )
+
+    /** A 段の10キー目（"）の文字 */
+    private val simejiQuoteChar = '"'
+
+    private fun isSimejiEnglishDefault(): Boolean =
+        simejiLayout && !romajiModeState.value && qwertyMode.value == QWERTYMode.Default
+
+    fun setSimejiLayout(enabled: Boolean) {
+        if (simejiLayout == enabled) return
+        simejiLayout = enabled
+        isNumberKeysShow = requestedNumberKeysShow && !enabled
+        enableFlickUpDetection = requestedFlickUpDetection || enabled
+        setQwertyGlideInputMode(requestedGlideInputMode)
+        if (enabled) {
+            binding.cursorLeft.isVisible = false
+            binding.cursorRight.isVisible = false
+            binding.keySwitchDefault.isVisible = false
+            binding.keyEmoji.isVisible = false
+            binding.keyKuten.isVisible = true
+            binding.keyTouten.isVisible = true
+        }
+        applyLayoutForMode(qwertyMode.value)
+        updateTopRightCharsForDefaultMode()
+        requestLayout()
+    }
+
+    /**
+     * Simeji 配列の英字画面: A 段の @ キーを L の後ろ（右端）に置いて " にし、A 段を端から端まで並べる。
+     * 空白キーを広めにする。それ以外の画面では元の並び（K / @ / L）に戻す。
+     */
+    private fun applySimejiRowLayout(mode: QWERTYMode) {
+        val simeji = simejiLayout && !romajiModeState.value && mode == QWERTYMode.Default
+        binding.apply {
+            if (simeji) {
+                keyAtMark.isVisible = true
+                keyAtMark.text = simejiQuoteChar.toString()
+                keyA.setMarginStart(keyIndentSmallDp)
+                keyAtMark.setMarginEnd(keyIndentSmallDp)
+            }
+        }
+        val set = ConstraintSet()
+        set.clone(this)
+        val k = binding.keyK.id
+        val at = binding.keyAtMark.id
+        val l = binding.keyL.id
+        val parentId = ConstraintSet.PARENT_ID
+        if (simeji) {
+            set.connect(k, ConstraintSet.END, l, ConstraintSet.START)
+            set.connect(l, ConstraintSet.START, k, ConstraintSet.END)
+            set.connect(l, ConstraintSet.END, at, ConstraintSet.START)
+            set.connect(at, ConstraintSet.START, l, ConstraintSet.END)
+            set.connect(at, ConstraintSet.END, parentId, ConstraintSet.END)
+            set.setHorizontalWeight(binding.keySpace.id, 1.5f)
+        } else {
+            set.connect(k, ConstraintSet.END, at, ConstraintSet.START)
+            set.connect(at, ConstraintSet.START, k, ConstraintSet.END)
+            set.connect(at, ConstraintSet.END, l, ConstraintSet.START)
+            set.connect(l, ConstraintSet.START, at, ConstraintSet.END)
+            set.connect(l, ConstraintSet.END, parentId, ConstraintSet.END)
+            set.setHorizontalWeight(binding.keySpace.id, 1f)
+        }
+        set.applyTo(this)
+    }
+
+    private fun applySimejiTopRightChars() {
+        qwertyButtonMap.forEach { (view, key) ->
+            if (view is QWERTYButton) view.topRightChar = simejiUpChars[key]
+        }
+    }
+
     private fun updateGlobalMargins() {
         val verticalMarginPx = dpToPx(keyVerticalMarginDp.toInt())
         val horizontalGapPx = dpToPx(keyHorizontalGapDp.toInt())
@@ -1048,6 +1140,14 @@ class QWERTYKeyboardView @JvmOverloads constructor(
     }
 
     private fun updateTopRightCharsForDefaultMode() {
+        if (simejiLayout && !romajiModeState.value) {
+            if (qwertyMode.value == QWERTYMode.Default) {
+                applySimejiTopRightChars()
+            } else {
+                qwertyButtonMap.keys.forEach { if (it is QWERTYButton) it.topRightChar = null }
+            }
+            return
+        }
         if (!isSymbolKeymapShow || qwertyMode.value != QWERTYMode.Default) {
             defaultQWERTYButtonsRoman.forEach { it.topRightChar = null }
             return
@@ -1165,7 +1265,8 @@ class QWERTYKeyboardView @JvmOverloads constructor(
     }
 
     fun setFlickUpDetectionEnabled(enabled: Boolean) {
-        this.enableFlickUpDetection = enabled
+        requestedFlickUpDetection = enabled
+        this.enableFlickUpDetection = enabled || simejiLayout
         updateNumberKeyFlickGuides()
     }
 
@@ -1443,7 +1544,10 @@ class QWERTYKeyboardView @JvmOverloads constructor(
         qwertyKeyTouchCancelListener = listener
     }
 
-    fun setQwertyGlideInputMode(enabled: Boolean) {
+    fun setQwertyGlideInputMode(requested: Boolean) {
+        requestedGlideInputMode = requested
+        // Simeji 配列では上フリックを使うので、なぞり入力は使わない
+        val enabled = requested && !simejiLayout
         if (qwertyGlideInputMode == enabled) return
         qwertyGlideInputMode = enabled
         if (!enabled) {
@@ -2423,6 +2527,12 @@ class QWERTYKeyboardView @JvmOverloads constructor(
 
     private fun handleUpFlick(previousView: View) {
         val qwertyKey = qwertyButtonMap[previousView] ?: QWERTYKey.QWERTYKeyNotSelect
+        if (isSimejiEnglishDefault()) {
+            simejiUpChars[qwertyKey]?.let { c ->
+                qwertyKeyListener?.onFlickUPQWERTYKey(qwertyKey = qwertyKey, tap = c, variations = listOf(c))
+            }
+            return
+        }
         getNumberKeyFlickUpChar(qwertyKey)?.let { charToInsert ->
             qwertyKeyListener?.onFlickUPQWERTYKey(
                 qwertyKey = qwertyKey,
@@ -2925,6 +3035,10 @@ class QWERTYKeyboardView @JvmOverloads constructor(
     }
 
     private fun getVariationInfo(key: QWERTYKey): VariationInfo? {
+        if (key == QWERTYKey.QWERTYKeyAtMark && isSimejiEnglishDefault()) {
+            val quote = listOf(simejiQuoteChar)
+            return VariationInfo(tap = simejiQuoteChar, cap = simejiQuoteChar, variations = quote, capVariations = quote)
+        }
         val info: QWERTYKeyInfo = when (qwertyMode.value) {
             QWERTYMode.Default -> if (romajiModeState.value) {
                 if (isNumberKeysShow) qwertyKeyMap.getKeyInfoDefaultJPWithNumberRow(key)
@@ -3157,12 +3271,13 @@ class QWERTYKeyboardView @JvmOverloads constructor(
         showKutouten: Boolean,
         showEmojiKey: Boolean = false
     ) {
-        binding.cursorLeft.isVisible = showCursors
-        binding.cursorRight.isVisible = showCursors
-        binding.keySwitchDefault.isVisible = showSwitchKey
-        binding.keyEmoji.isVisible = showEmojiKey
-        binding.keyKuten.isVisible = showKutouten
-        binding.keyTouten.isVisible = showKutouten
+        // Simeji 配列: 下の段は あA / 123 / , / 空白 / . / 改行（カーソル・地球儀・絵文字は出さない）
+        binding.cursorLeft.isVisible = showCursors && !simejiLayout
+        binding.cursorRight.isVisible = showCursors && !simejiLayout
+        binding.keySwitchDefault.isVisible = showSwitchKey && !simejiLayout
+        binding.keyEmoji.isVisible = showEmojiKey && !simejiLayout
+        binding.keyKuten.isVisible = showKutouten || simejiLayout
+        binding.keyTouten.isVisible = showKutouten || simejiLayout
     }
 
     fun setRomajiEnglishSwitchKeyVisibility(showRomajiEnglishKey: Boolean) {
@@ -3242,7 +3357,8 @@ class QWERTYKeyboardView @JvmOverloads constructor(
     }
 
     fun updateNumberKeyState(state: Boolean) {
-        this.isNumberKeysShow = state
+        requestedNumberKeysShow = state
+        this.isNumberKeysShow = state && !simejiLayout
         displayOrHideNumberKeys(state)
         // Ensure topRightChars update correctly when number row toggles
         updateTopRightCharsForDefaultMode()

@@ -219,13 +219,9 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
     private var clearGridApplied = false
     private var lastThemeApply: (() -> Unit)? = null
     private var onClearGridChanged: ((Boolean) -> Unit)? = null
-    // 格子の色は Claude（Anthropic）の公式配色: 線 = Orange #d97757、ふち = Dark #141413
+    // 格子の色は Claude（Anthropic）の公式配色の Orange #d97757
     private val clearGridPaint = android.graphics.Paint().apply {
-        color = 0xE6D97757.toInt()
-        style = android.graphics.Paint.Style.FILL
-    }
-    private val clearGridHaloPaint = android.graphics.Paint().apply {
-        color = 0x99141413.toInt()
+        color = 0xFFD97757.toInt()
         style = android.graphics.Paint.Style.FILL
     }
 
@@ -892,7 +888,6 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
 
     /**
      * 格子: 縦線は中央2本が4段・左右の境目が3段、横線は上2本が5列・3本目が中央3列。
-     * どんな背景でも見えるよう、暗いふちを先に全部描いてから、その上にオレンジの線を描く。
      */
     private fun drawCenterGrid(canvas: android.graphics.Canvas, half: Float) {
         val rects = ArrayList<android.graphics.RectF>(8)
@@ -920,10 +915,6 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
                 rects += android.graphics.RectF(0f, y - half, width.toFloat(), y + half)
             }
             rects += android.graphics.RectF(left, y3 - half, right, y3 + half)
-        }
-        val halo = resources.displayMetrics.density.coerceAtLeast(1f)
-        rects.forEach { r ->
-            canvas.drawRect(r.left - halo, r.top - halo, r.right + halo, r.bottom + halo, clearGridHaloPaint)
         }
         rects.forEach { r -> canvas.drawRect(r, clearGridPaint) }
     }
