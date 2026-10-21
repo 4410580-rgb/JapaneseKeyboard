@@ -252,6 +252,7 @@ import com.kazumaproject.markdownhelperkeyboard.dictionary_override.DictionaryBi
 import com.kazumaproject.markdownhelperkeyboard.dictionary_override.DictionaryCategory
 import com.kazumaproject.markdownhelperkeyboard.dictionary_override.DictionaryCategoryLoadState
 import com.kazumaproject.markdownhelperkeyboard.dictionary_override.DictionaryOverrideStore
+import com.kazumaproject.markdownhelperkeyboard.dictionary_override.isOptionalMozcUt
 import com.kazumaproject.markdownhelperkeyboard.dictionary_override.DictionarySourceResolver
 import com.kazumaproject.markdownhelperkeyboard.gemma.GemmaImageCapability
 import com.kazumaproject.markdownhelperkeyboard.gemma.GemmaTranslationManager
@@ -1809,6 +1810,16 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                 .putBoolean("enable_zenz_rerank_preference", true)
                 .putBoolean("clear_keyboard_zenz_v1", true)
                 .apply()
+        }
+        // APK に入っている追加の辞書（分野別の30辞書: 人名・地名・作品名・一般語・医療など）を一度だけ全部有効にする。
+        // 邪魔な語は学習を忘れさせるか、設定の辞書画面で分野ごとにオフにできる
+        if (!prefs.getBoolean("clear_keyboard_all_dictionaries_v1", false)) {
+            runCatching {
+                com.kazumaproject.markdownhelperkeyboard.dictionary_override.DictionaryCategory.entries
+                    .filter { it.isOptionalMozcUt() }
+                    .forEach { dictionaryOverrideStore.setOptionalBundledEnabled(it, true) }
+                prefs.edit().putBoolean("clear_keyboard_all_dictionaries_v1", true).apply()
+            }.onFailure { Timber.w(it, "Unable to enable the bundled dictionaries") }
         }
         // ユーザー辞書に入れておく語（一度だけ。消されたら戻さない）
         addUserWordsOnce(prefs, "clear_keyboard_gmail_word_v1", "@gmail.com", listOf("あっと", "じーめーる"))
