@@ -1774,6 +1774,48 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         }
     }
 
+    /**
+     * 透過キーボード（自分用）: APK に入れた追加の語彙（Mozc UT 辞書、約260万語）を
+     * 「システムユーザー辞書」の置き場所へ写して読み込む。中身が変わったとき（版が違うとき）だけ写す。
+     * 設定の「システムユーザー辞書」で作り直すと、この辞書は上書きされる。
+     */
+    private fun installClearUtDictionaryIfNeeded() {
+        val names = listOf(
+            "yomi_system_user_dictionary.dat",
+            "tango_system_user_dictionary.dat",
+            "token_system_user_dictionary.dat",
+            "pos_table_system_user_dictionary.dat",
+            "meta_system_user_dictionary.dat",
+        )
+        ioScope.launch {
+            runCatching {
+                val version = runCatching {
+                    assets.open("clear_ut/version.txt").bufferedReader().use { it.readText().trim() }
+                }.getOrNull() ?: return@launch
+                val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this@IMEService)
+                val dir = File(filesDir, "system_user_dictionary")
+                if (prefs.getString(CLEAR_UT_VERSION_KEY, null) == version &&
+                    names.all { File(dir, it).exists() }
+                ) return@launch
+                val engine = kanaKanjiEngineReady.await()
+                engine.releaseSystemUserDictionary()
+                dir.mkdirs()
+                names.forEach { name ->
+                    val temp = File(dir, "$name.tmp")
+                    assets.open("clear_ut/$name").use { input ->
+                        temp.outputStream().buffered(1 shl 20).use { output -> input.copyTo(output, 1 shl 20) }
+                    }
+                    val target = File(dir, name)
+                    target.delete()
+                    check(temp.renameTo(target)) { "rename failed: $name" }
+                }
+                prefs.edit().putString(CLEAR_UT_VERSION_KEY, version).apply()
+                engine.loadSystemUserDictionaryFromFiles(applicationContext)
+                Timber.i("Installed the UT dictionary: $version")
+            }.onFailure { Timber.w(it, "Unable to install the UT dictionary") }
+        }
+    }
+
     private fun resetKeyboardSizeOnceForClearKeyboard() {
         val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this)
         // 学習: 先頭候補を選んでも覚える・学習した語を1文字目から予測の先頭に出す
@@ -2545,6 +2587,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         private const val LONG_DELAY_TIME = 64L
         /** 透過キーボード: ← → 長押しで候補を送る間隔 */
         private const val CLEAR_CANDIDATE_REPEAT_MS = 90L
+        private const val CLEAR_UT_VERSION_KEY = "clear_keyboard_ut_dictionary_version"
         private const val DEFAULT_DELAY_MS = 1000L
         private const val DEFAULT_LIVE_CONVERSION_APPLY_DELAY_MS = 120L
         private const val PAGE_SIZE: Int = 5
@@ -3355,6 +3398,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
     override fun onCreate() {
         super.onCreate()
         resetKeyboardSizeOnceForClearKeyboard()
+        installClearUtDictionaryIfNeeded()
         localFontScope.launch {
             runCatching { localFontRepository.loadIfNeeded() }
                 .onFailure { Timber.w(it, "Unable to restore the saved local keyboard font") }

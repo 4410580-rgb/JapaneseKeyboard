@@ -57,6 +57,37 @@ jobs:
           path: .zenz-model-cache
           key: ${{ runner.os }}-zenz-model-v2-4f5423f0fad41a73b1242eb96fe5c12ae4fdca83-Q5_K_M-ggml-model-Q5_K_M.gguf
 
+      # 追加の語彙: Mozc UT 辞書（約260万語）をアプリの「システムユーザー辞書」の形式にして APK に入れる。
+      # 作るのに時間がかかるので、作り方が変わらない限りキャッシュを使う
+      - name: Cache UT dictionary
+        id: ut-cache
+        uses: actions/cache@v4
+        with:
+          path: .clear-ut/out
+          key: clear-ut-v1-${{ hashFiles('tools/clear-ut-dictionary/**', 'app/src/test/java/com/kazumaproject/markdownhelperkeyboard/converter/ClearUtDictionaryGenerator.kt', 'app/src/main/assets/id.def') }}
+
+      - name: Build UT dictionary
+        if: steps.ut-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 tools/clear-ut-dictionary/build_ut.py .clear-ut app/src/main/assets/id.def
+          CLEAR_UT_TSV=$PWD/.clear-ut/ut.tsv CLEAR_UT_OUT=$PWD/.clear-ut/out \
+            ./gradlew :app:testFullStandardDebugUnitTest \
+            --tests 'com.kazumaproject.markdownhelperkeyboard.converter.ClearUtDictionaryGenerator' \
+            -PzenzDebugOptimizedNative=true \
+            --stacktrace --no-daemon --max-workers=2 \
+            -Dorg.gradle.jvmargs=-Xmx3g -i 2>&1 | tee build.log | grep --line-buffered -E 'entries=|Nodes=|たいけん|FAILED|Exception|^e: |BUILD'
+          ls -la .clear-ut/out
+          test -f .clear-ut/out/token_system_user_dictionary.dat
+
+      - name: Put UT dictionary into assets
+        shell: bash
+        run: |
+          mkdir -p app/src/full/assets/clear_ut
+          cp .clear-ut/out/*.dat .clear-ut/out/version.txt app/src/full/assets/clear_ut/
+          ls -la app/src/full/assets/clear_ut
+
       # AI 変換（zenz）入りの full 版。ネイティブ部分は最適化してビルドする（デバッグのままだと変換が遅い）
       - name: Build APK
         run: >-
@@ -71,7 +102,7 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          grep -E '^e: |error:|FAILURE|What went wrong' -A2 build.log | head -40 > errs.txt || true
+          grep -E '^e: |error:|FAILURE|What went wrong|AssertionError|OutOfMemoryError|IllegalStateException' -A2 build.log | head -40 > errs.txt || true
           msg=$(sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g' errs.txt)
           echo "::error title=build::${msg}"
 

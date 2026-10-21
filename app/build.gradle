@@ -144,7 +144,8 @@ android {
         unitTests {
             includeAndroidResources = true
             all {
-                maxHeapSize = '2g'
+                // 透過キーボード: CI で UT 辞書を作るとき（ClearUtDictionaryGenerator）は大きなメモリが要る
+                maxHeapSize = System.getenv("CLEAR_UT_TSV") ? '8g' : '2g'
                 inputs.file(rootProject.file("tools/classified-dictionaries/distribution-manifest.json"))
             }
         }
