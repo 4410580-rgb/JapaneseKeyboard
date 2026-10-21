@@ -1947,6 +1947,10 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         insertString: String,
     ): Boolean {
         if (!clearKeyboard.isActive() || insertString.isEmpty() || suggestions.isEmpty()) return false
+        // 予測候補が出ているときの最初の → は、2つ目の候補から選ぶ
+        if (right && !isHenkan.get() && suggestions.size >= 2) {
+            suggestionClickNum = 1
+        }
         if (!isHenkan.get() || right) {
             handleJapaneseModeSpaceKey(mainView, suggestions, insertString)
         } else {
