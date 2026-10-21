@@ -16,7 +16,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
+    env:
+      ZENZ_MODEL_CACHE_DIR: ${{ github.workspace }}/.zenz-model-cache
 
     steps:
       - name: Checkout code
@@ -49,9 +51,17 @@ jobs:
             ${{ runner.os }}-clear-gradle-
             ${{ runner.os }}-gradle-
 
+      - name: Cache Zenz model
+        uses: actions/cache@v4
+        with:
+          path: .zenz-model-cache
+          key: ${{ runner.os }}-zenz-model-v2-4f5423f0fad41a73b1242eb96fe5c12ae4fdca83-Q5_K_M-ggml-model-Q5_K_M.gguf
+
+      # AI 変換（zenz）入りの full 版。ネイティブ部分は最適化してビルドする（デバッグのままだと変換が遅い）
       - name: Build APK
         run: >-
-          ./gradlew :app:assembleLiteFdroidDebug
+          ./gradlew :app:assembleFullStandardDebug
+          -PzenzDebugOptimizedNative=true
           --stacktrace --no-daemon --max-workers=2
           -Dorg.gradle.jvmargs=-Xmx3g
           2>&1 | tee build.log; exit ${PIPESTATUS[0]}
@@ -69,14 +79,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: clear-keyboard-apk
-          path: app/build/outputs/apk/liteFdroid/debug/*.apk
+          path: app/build/outputs/apk/fullStandard/debug/*.apk
 
       - name: Update release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
-          APK=$(ls app/build/outputs/apk/liteFdroid/debug/*.apk | head -1)
+          APK=$(ls app/build/outputs/apk/fullStandard/debug/*.apk | head -1)
           cp "$APK" clear-keyboard.apk
           gh release view latest-clear >/dev/null 2>&1 || gh release create latest-clear --title "透過キーボード 最新版" --notes "dev ブランチの最新ビルド"
           gh release upload latest-clear clear-keyboard.apk --clobber

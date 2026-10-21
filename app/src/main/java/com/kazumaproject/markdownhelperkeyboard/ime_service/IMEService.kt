@@ -1800,6 +1800,16 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                 .putBoolean("clear_keyboard_learn_v1", true)
                 .apply()
         }
+        // AI 変換（zenz）入りの版なら、AI の予測変換と候補の並び替えを一度だけ有効にする
+        if (com.kazumaproject.markdownhelperkeyboard.variant.AppVariantConfig.hasZenz &&
+            !prefs.getBoolean("clear_keyboard_zenz_v1", false)
+        ) {
+            prefs.edit()
+                .putBoolean("enable_ai_conversion_zenz_preference", true)
+                .putBoolean("enable_zenz_rerank_preference", true)
+                .putBoolean("clear_keyboard_zenz_v1", true)
+                .apply()
+        }
         // ユーザー辞書に入れておく語（一度だけ。消されたら戻さない）
         addUserWordsOnce(prefs, "clear_keyboard_gmail_word_v1", "@gmail.com", listOf("あっと", "じーめーる"))
         addUserWordsOnce(prefs, "clear_keyboard_claude_word_v1", "Claude", listOf("くろーど"))

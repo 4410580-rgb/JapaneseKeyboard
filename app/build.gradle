@@ -52,6 +52,9 @@ android {
     productFlavors {
         full {
             dimension "edition"
+            // 透過キーボード（自分用）: AI 変換（zenz）入りの full 版を、これまでの lite F-Droid 版と
+            // 同じパッケージ名（...lite.fdroid.clear）で作り、上書きインストールで学習データを引き継ぐ
+            applicationIdSuffix ".lite.fdroid"
             buildConfigField "boolean", "HAS_ZENZ", "true"
             buildConfigField "boolean", "HAS_GEMMA", "true"
             buildConfigField "String", "APP_EDITION", "\"full\""
