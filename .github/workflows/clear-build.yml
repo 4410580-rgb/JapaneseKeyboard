@@ -88,6 +88,27 @@ jobs:
           cp .clear-ut/out/*.dat .clear-ut/out/version.txt app/src/full/assets/clear_ut/
           ls -la app/src/full/assets/clear_ut
 
+      # 変換の様子を調べる（読みごとの候補と、どの辞書の語が使われたか）。結果は注記に出す
+      - name: Conversion probe
+        continue-on-error: true
+        shell: bash
+        run: |
+          CLEAR_PROBE=1 CLEAR_UT_OUT=$PWD/.clear-ut/out \
+            ./gradlew :app:testFullStandardDebugUnitTest \
+            --tests 'com.kazumaproject.markdownhelperkeyboard.converter.ClearConversionProbe' \
+            -PzenzDebugOptimizedNative=true \
+            --no-daemon --max-workers=2 -Dorg.gradle.jvmargs=-Xmx3g > probe.log 2>&1 || true
+          f=app/build/clear-probe.txt
+          if [ -f "$f" ]; then
+            split -l 120 "$f" probe-part-
+            for p in probe-part-*; do
+              msg=$(sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g' "$p")
+              echo "::notice title=probe $p::${msg}"
+            done
+          else
+            grep -E '^e: |FAILED|Exception' probe.log | head -20
+          fi
+
       # AI 変換（zenz）入りの full 版。ネイティブ部分は最適化してビルドする（デバッグのままだと変換が遅い）
       - name: Build APK
         run: >-
