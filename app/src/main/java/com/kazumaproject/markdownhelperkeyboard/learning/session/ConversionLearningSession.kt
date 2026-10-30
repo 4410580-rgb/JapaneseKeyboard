@@ -21,6 +21,10 @@ class ConversionLearningSession {
     val isActive: Boolean
         get() = originalReading != null
 
+    /** 透過キーボード: 直前に finish した入力全体の(読み, 表記)。続けて確定した2語をつないで覚えるのに使う */
+    var lastComplete: Pair<String, String>? = null
+        private set
+
     fun beginIfNeeded(reading: String) {
         if (originalReading == null && reading.isNotEmpty()) {
             originalReading = reading
@@ -39,7 +43,9 @@ class ConversionLearningSession {
         val reading = originalReading
         val recorded = fragments.toList()
         cancel()
+        lastComplete = null
         if (reading.isNullOrEmpty() || recorded.isEmpty()) return emptyList()
+        lastComplete = reading to recorded.joinToString(separator = "") { it.output }
 
         val learnable = recorded.filter {
             learnFirstCandidate || it.explicitlySelected || it.candidateIndex != 0

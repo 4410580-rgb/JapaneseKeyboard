@@ -2525,7 +2525,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
                         return false
                     }
 
-                    if (pressedKey.pointer == event.getPointerId(event.actionIndex)) {
+                    if (pressedKey.pointer == event.getPointerId(event.actionIndex) && !pressedKey.committed) {
                         val gestureType = getGestureType(event)
                         Log.d("TenKey: ACTION_UP in pointer", "called $pressedKey")
 
@@ -2598,10 +2598,20 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
                         return true
                     }
 
+                    // 透過キーボード: もう確定した(フリックと分かった時点で入力した)後は、指を離すまで何もしない
+                    if (pressedKey.committed) return false
                     val gestureType = if (event.pointerCount == 1) {
                         getGestureType(event, 0)
                     } else {
                         getGestureType(event, pressedKey.pointer)
+                    }
+                    // 透過キーボード: 文字のキーはフリックと分かった時点で確定する(指を離すのを待たない)
+                    if (isFlickGesture(gestureType) && !isLongPressed && keyInfoFor(pressedKey.key) is KeyInfo.KeyTapFlickInfo) {
+                        longPressJob?.cancel()
+                        dispatchResolvedGesture(pressedKey.key, gestureType)
+                        pressedKey = pressedKey.copy(committed = true)
+                        popupWindowActive.hide()
+                        return false
                     }
                     flickTextPreviewEmitter.update(
                         resolveTextSelection(pressedKey.key, gestureType)
@@ -2648,13 +2658,13 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
                         if (pressedKey.key == Key.KeyDakutenSmall && currentInputMode.value == InputMode.ModeNumber) {
                             setNumberSmallKeyPresentation()
                         }
-                        dispatchResolvedGesture(pressedKey.key, gestureType2)
+                        if (!pressedKey.committed) dispatchResolvedGesture(pressedKey.key, gestureType2)
                         (getButtonFromKey(pressedKey.key) as? AppCompatButton)?.let { button ->
                             setTextForMode(button, currentInputMode.value)
                         }
                         val (initialX, initialY) = getRawCoordinates(event, event.actionIndex)
                         pressedKey = pressedKey.copy(
-                            key = key, pointer = pointer, initialX = initialX, initialY = initialY
+                            key = key, pointer = pointer, initialX = initialX, initialY = initialY, committed = false
                         )
                         setKeyPressed()
                         flickTextPreviewEmitter.begin(
@@ -2681,7 +2691,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
                                 event, event.getPointerId(event.actionIndex)
                             )
                             Log.d("TenKey: ACTION_POINTER_UP", "called [${pressedKey.key}]")
-                            dispatchResolvedGesture(pressedKey.key, gestureType)
+                            if (!pressedKey.committed) dispatchResolvedGesture(pressedKey.key, gestureType)
                             val button = getButtonFromKey(pressedKey.key)
                             button?.let {
                                 if (it is AppCompatButton) {
@@ -3307,6 +3317,23 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         val (finalX, finalY) = getRawCoordinates(event, pointer)
         val distanceX = finalX - pressedKey.initialX
         val distanceY = finalY - pressedKey.initialY
+        val type = rawGestureType(distanceX, distanceY)
+        // 透過キーボード: ⌫ の全消去(上)は2倍、1行ぶんの消去(左)は1.5倍動かさないと出ない(誤って消さないように)
+        if (pressedKey.key == Key.SideKeyDelete) {
+            val need = when (type) {
+                GestureType.FlickTop -> 2.0f
+                GestureType.FlickLeft -> 1.5f
+                else -> 1f
+            }
+            if (need > 1f) {
+                val moved = if (type == GestureType.FlickTop) -distanceY else -distanceX
+                if (moved < flickThresholdPx * need) return GestureType.Tap
+            }
+        }
+        return type
+    }
+
+    private fun rawGestureType(distanceX: Float, distanceY: Float): GestureType {
         return when (
             FlickGestureMath.cardinalDirection(
                 deltaX = distanceX,
@@ -3383,6 +3410,9 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
             isFlick = gestureType != GestureType.Tap
         )
     }
+
+    private fun isFlickGesture(t: GestureType): Boolean =
+        t == GestureType.FlickLeft || t == GestureType.FlickTop || t == GestureType.FlickRight || t == GestureType.FlickBottom
 
     private fun dispatchResolvedGesture(key: Key, gestureType: GestureType) {
         val keyInfo = keyInfoFor(key)

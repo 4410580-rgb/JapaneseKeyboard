@@ -216,6 +216,7 @@ import com.kazumaproject.markdownhelperkeyboard.converter.candidate.CANDIDATE_TY
 import com.kazumaproject.markdownhelperkeyboard.converter.candidate.CANDIDATE_TYPE_FORMULA_TEX
 import com.kazumaproject.markdownhelperkeyboard.converter.candidate.CANDIDATE_TYPE_FORMULA_UNICODE
 import com.kazumaproject.markdownhelperkeyboard.converter.candidate.CANDIDATE_TYPE_LEARNED_DICTIONARY
+import com.kazumaproject.markdownhelperkeyboard.learning.database.LearnEntity
 import com.kazumaproject.markdownhelperkeyboard.converter.candidate.CANDIDATE_TYPE_TIME
 import com.kazumaproject.markdownhelperkeyboard.converter.candidate.CANDIDATE_TYPE_UNIT_CONVERSION
 import com.kazumaproject.markdownhelperkeyboard.converter.candidate.CANDIDATE_TYPE_UTILITY_LITERAL
@@ -1382,6 +1383,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
 
     private fun rememberZeroQueryKeyAfterCommit(committedText: String) {
         if (committedText.isBlank()) return
+        commitSequence++
         learnNextWordPair(committedText)
         pendingZeroQueryKeyAfterCommit = committedText
     }
@@ -1851,6 +1853,16 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                 .putBoolean("enable_ai_conversion_zenz_preference", true)
                 .putBoolean("enable_zenz_rerank_preference", true)
                 .putBoolean("clear_keyboard_zenz_v1", true)
+                .apply()
+        }
+        // 2026-10-30: AI 変換(zenz)と、zenz による候補の並び替えは一度だけオフに戻す。
+        // 小さいモデルなので、変換の本体が正しく1番に出した「高速戦闘」を「高速線等を」(入力に無い「を」付き)のように
+        // 崩していた(本体だけで変換させるテスト ClearConversionProbe で確認)。設定からはまたオンにできる
+        if (!prefs.getBoolean("clear_keyboard_zenz_off_v2", false)) {
+            prefs.edit()
+                .putBoolean("enable_ai_conversion_zenz_preference", false)
+                .putBoolean("enable_zenz_rerank_preference", false)
+                .putBoolean("clear_keyboard_zenz_off_v2", true)
                 .apply()
         }
         // APK に入っている追加の辞書（分野別の30辞書: 人名・地名・作品名・一般語・医療など）を一度だけ全部有効にする。
@@ -13059,6 +13071,12 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                                 output = candidate.string,
                             )
                             withContext(Dispatchers.Main) {
+                                // AI 変換の並べ替え結果を覚えておく所に、消した候補が残っていると表示に戻ってしまう。
+                                // それも消してから候補を作り直す(消したのに出続ける不具合の対策)
+                                beginZenzRerankRequest()
+                                synchronized(zenzRerankCache) { zenzRerankCache.clear() }
+                                candidateRequestTracker.invalidate()
+                                candidateRefreshCoordinator.invalidate()
                                 requestCandidateRefresh(CandidateShowFlag.Updating)
                             }
                         }
@@ -26420,10 +26438,48 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         if (complete) persistCompletedLearningSession()
     }
 
+    /**
+     * 透過キーボード: 直前に変換して確定した入力(読み, 表記, その時の確定の番号, 時刻)。
+     * 「こうそく」→高速 を確定してすぐ「せんとう」→戦闘 を確定したら、「こうそくせんとう→高速戦闘」も覚える
+     */
+    private data class CommittedPhrase(val reading: String, val output: String, val commitSeq: Long, val at: Long)
+
+    private var lastCommittedPhrase: CommittedPhrase? = null
+
+    /** 確定のたびに増える番号(間に別の確定が挟まっていないかを見る) */
+    private var commitSequence = 0L
+
+    private fun joinedPhraseEntry(reading: String, output: String): LearnEntity? {
+        val now = System.currentTimeMillis()
+        val prev = lastCommittedPhrase
+        lastCommittedPhrase = CommittedPhrase(reading, output, commitSequence, now)
+        if (prev == null) return null
+        // 続けて確定した時だけ(間に別の確定が無く、20秒以内)
+        if (commitSequence - prev.commitSeq > 1 || now - prev.at > 20_000L) return null
+        val r = prev.reading + reading
+        val o = prev.output + output
+        fun hasKanji(s: String) = s.any { Character.UnicodeScript.of(it.code) == Character.UnicodeScript.HAN }
+        val hiragana = Regex("^[ぁ-ゖー]+$")
+        if (!hiragana.matches(r) || r.length > 20 || o.length > 20) return null
+        if (!hasKanji(prev.output) || !hasKanji(output)) return null
+        return LearnEntity(
+            input = r,
+            out = o,
+            score = 2000,
+            leftId = null,
+            rightId = null,
+            usageCount = 1,
+            lastUsedAt = now,
+            isPhrase = true,
+        )
+    }
+
     private fun persistCompletedLearningSession() {
-        val entries = conversionLearningSession.finish(
+        val produced = conversionLearningSession.finish(
             learnFirstCandidate = learnFirstCandidateDictionaryPreference == true,
         )
+        val joined = conversionLearningSession.lastComplete?.let { (r, o) -> joinedPhraseEntry(r, o) }
+        val entries = if (joined != null) produced + joined else produced
         if (entries.isEmpty()) return
         val allowMixedSymbolsAndNumbers = learnDictionaryAllowMixedSymbolsNumbersPreference
         ioScope.launch {
