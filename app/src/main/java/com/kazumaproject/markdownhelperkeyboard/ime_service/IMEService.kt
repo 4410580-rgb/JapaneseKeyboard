@@ -2595,6 +2595,9 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
             KeyboardFontApplicator.processSnapshot,
         )
 
+    // 透過キーボード:物理キーボードがつながっていても画面のキーボードを優先する(false にすると本家と同じ動き)
+    private val PREFER_SCREEN_KEYBOARD = true
+
     companion object {
         private const val LONG_DELAY_TIME = 64L
         /** 透過キーボード: ← → 長押しで候補を送る間隔 */
@@ -30852,6 +30855,9 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
     }
 
     private fun isDevicePhysicalKeyboard(device: InputDevice?): Boolean {
+        // 透過キーボード(自分用の改造):外付けキーボードやキーボードとして届くコントローラーをつないでも、
+        // 物理キーボード用の小さなバー(「あ」と ⌨)に切り替えず、いつもの画面のキーボードを出す
+        if (PREFER_SCREEN_KEYBOARD) return false
         if (device == null) return false
 
         // Checks that it's not the software keyboard
