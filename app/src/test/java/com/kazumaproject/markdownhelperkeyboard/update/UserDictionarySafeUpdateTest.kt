@@ -218,8 +218,13 @@ private class FakeLearnDao(
         prefix: String,
         prefixUpperBound: String,
         limit: Int,
+        minUsageCount: Int,
     ): List<LearnEntity> =
         entries.filter { it.input.startsWith(prefix) }.take(limit)
+
+    override suspend fun deleteLongRarelyUsed(maxReading: Int, keepUsageCount: Int): Int = 0
+
+    override suspend fun raiseScoresToFloor(floor: Int): Int = 0
 
     override suspend fun findCommonPrefixes(searchTerm: String): List<LearnEntity> =
         entries.filter { searchTerm.startsWith(it.input) }

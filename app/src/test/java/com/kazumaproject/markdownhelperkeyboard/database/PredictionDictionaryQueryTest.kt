@@ -62,8 +62,64 @@ class PredictionDictionaryQueryTest {
             prefix = "かな",
             prefixUpperBound = "かな\uFFFF",
             limit = 2,
+            minUsageCount = 1,
         )
 
         assertEquals(listOf("low", "middle"), result.map { it.out })
+    }
+
+    @Test
+    fun learningDictionaryCanHideEntriesUsedOnlyOnce() = runBlocking {
+        database.learnDao().insertAll(
+            listOf(
+                LearnEntity(input = "しん", out = "芯", score = 0, usageCount = 1),
+                LearnEntity(input = "しんぶん", out = "新聞", score = 900, usageCount = 2),
+            )
+        )
+
+        val result = database.learnDao().predictiveSearchByInput(
+            prefix = "し",
+            prefixUpperBound = "し\uFFFF",
+            limit = 4,
+            minUsageCount = 2,
+        )
+
+        assertEquals(listOf("新聞"), result.map { it.out })
+    }
+
+    @Test
+    fun explicitChoiceOutranksRivalsAndPassiveAcceptDoesNotReinforce() = runBlocking {
+        val dao = database.learnDao()
+        dao.insertAll(listOf(LearnEntity(input = "しん", out = "芯", score = 100)))
+
+        dao.upsertLearningEntries(listOf(LearnEntity(input = "しん", out = "新", score = 4000)), emptySet())
+        dao.upsertLearningEntries(
+            listOf(LearnEntity(input = "しん", out = "芯", score = 100)),
+            setOf("しん" to "芯"),
+        )
+
+        val byOut = dao.findByInput("しん")!!.associate { it.out to it.score }
+        assertEquals(100, byOut["芯"])
+        assertEquals(99, byOut["新"])
+    }
+
+    @Test
+    fun cleanupRemovesLongRarelyUsedEntriesAndRaisesScores() = runBlocking {
+        val dao = database.learnDao()
+        dao.insertAll(
+            listOf(
+                LearnEntity(input = "あとはちょうぶんのにゅうりょくが", out = "あとは長文の入力が", usageCount = 1),
+                LearnEntity(input = "よろしくおねがいします", out = "よろしくお願いします", usageCount = 5),
+                LearnEntity(input = "しん", out = "芯", score = 0, usageCount = 9),
+            )
+        )
+
+        assertEquals(1, dao.deleteLongRarelyUsed(maxReading = 8, keepUsageCount = 3))
+        dao.raiseScoresToFloor(2000)
+
+        assertEquals(
+            setOf("よろしくお願いします" to 3000, "芯" to 2000),
+            dao.getAllSuspend().map { it.out to it.score }.toSet(),
+        )
     }
 }

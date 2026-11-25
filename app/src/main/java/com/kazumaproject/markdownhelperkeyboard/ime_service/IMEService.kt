@@ -1845,6 +1845,14 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                 .putBoolean("clear_keyboard_learn_v1", true)
                 .apply()
         }
+        // 丸ごと覚えた長文と、強まりすぎた学習の点数を一度だけ掃除する
+        if (!prefs.getBoolean("clear_keyboard_learn_cleanup_v1", false)) {
+            ioScope.launch {
+                runCatching { learnRepository.cleanUpOverLearning() }
+                    .onSuccess { prefs.edit().putBoolean("clear_keyboard_learn_cleanup_v1", true).apply() }
+                    .onFailure { Timber.w(it, "learning cleanup failed") }
+            }
+        }
         // AI 変換（zenz）入りの版なら、AI の予測変換と候補の並び替えを一度だけ有効にする
         if (com.kazumaproject.markdownhelperkeyboard.variant.AppVariantConfig.hasZenz &&
             !prefs.getBoolean("clear_keyboard_zenz_v1", false)
@@ -26481,6 +26489,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         val produced = conversionLearningSession.finish(
             learnFirstCandidate = learnFirstCandidateDictionaryPreference == true,
         )
+        val passive = conversionLearningSession.lastPassive
         val joined = conversionLearningSession.lastComplete?.let { (r, o) -> joinedPhraseEntry(r, o) }
         val entries = if (joined != null) produced + joined else produced
         if (entries.isEmpty()) return
@@ -26490,6 +26499,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                 learnRepository.upsertLearnedDataBatch(
                     learnDataList = entries,
                     allowJapaneseWithSymbolsAndNumbers = allowMixedSymbolsAndNumbers,
+                    passive = passive,
                 )
             } catch (e: CancellationException) {
                 throw e

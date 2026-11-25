@@ -68,6 +68,7 @@ class LearnRepository @Inject constructor(
     suspend fun upsertLearnedDataBatch(
         learnDataList: List<LearnEntity>,
         allowJapaneseWithSymbolsAndNumbers: Boolean,
+        passive: Set<Pair<String, String>> = emptySet(),
     ) {
         val eligibleEntries = learnDataList.filter { entry ->
             LearningEligibilityPolicy.isEligible(
@@ -77,7 +78,7 @@ class LearnRepository @Inject constructor(
             )
         }
         if (eligibleEntries.isEmpty()) return
-        learnDao.upsertLearningEntries(eligibleEntries)
+        learnDao.upsertLearningEntries(eligibleEntries, passive)
         invalidateConversionSnapshot()
     }
 
@@ -89,7 +90,23 @@ class LearnRepository @Inject constructor(
      * @return A list of matching LearnEntity objects.
      */
     suspend fun predictiveSearchByInput(prefix: String, limit: Int): List<LearnEntity> =
-        learnDao.predictiveSearchByInput(prefix, prefix.upperBound(), limit)
+        learnDao.predictiveSearchByInput(
+            prefix = prefix,
+            prefixUpperBound = prefix.upperBound(),
+            limit = limit,
+            // 1〜2文字の読みでは、1回確定しただけの語を予測の先頭に出さない
+            minUsageCount = if (prefix.length <= SHORT_PREFIX_LENGTH) SHORT_PREFIX_MIN_USAGE else 1,
+        )
+
+    /** 透過キーボード: 丸ごと覚えた長文と、強まりすぎた点数の一度きりの掃除 */
+    suspend fun cleanUpOverLearning() {
+        val deleted = learnDao.deleteLongRarelyUsed(
+            maxReading = CLEANUP_MAX_READING,
+            keepUsageCount = CLEANUP_KEEP_USAGE,
+        )
+        val raised = learnDao.raiseScoresToFloor(CLEANUP_SCORE_FLOOR)
+        if (deleted > 0 || raised > 0) invalidateConversionSnapshot()
+    }
 
     /**
      * Calls the DAO to find entries that are a common prefix of the given search term.
@@ -177,6 +194,12 @@ class LearnRepository @Inject constructor(
 }
 
 private fun String.upperBound(): String = this + '\uFFFF'
+
+private const val SHORT_PREFIX_LENGTH = 2
+private const val SHORT_PREFIX_MIN_USAGE = 2
+private const val CLEANUP_MAX_READING = 8
+private const val CLEANUP_KEEP_USAGE = 3
+private const val CLEANUP_SCORE_FLOOR = 2000
 
 enum class LearnUpdateResult {
     Updated,

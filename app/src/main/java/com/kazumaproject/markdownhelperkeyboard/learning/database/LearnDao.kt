@@ -57,6 +57,7 @@ interface LearnDao {
         """
         SELECT * FROM learn_table
         WHERE input >= :prefix AND input < :prefixUpperBound
+          AND usageCount >= :minUsageCount
         ORDER BY CASE WHEN input = :prefix THEN 0 ELSE 1 END,
                  score ASC,
                  lastUsedAt DESC,
@@ -69,7 +70,16 @@ interface LearnDao {
         prefix: String,
         prefixUpperBound: String,
         limit: Int,
+        minUsageCount: Int,
     ): List<LearnEntity>
+
+    /** 透過キーボード: 一度きりの掃除。あまり使っていない長い読みの学習を消す */
+    @Query("DELETE FROM learn_table WHERE LENGTH(input) > :maxReading AND usageCount < :keepUsageCount")
+    suspend fun deleteLongRarelyUsed(maxReading: Int, keepUsageCount: Int): Int
+
+    /** 透過キーボード: 一度きりの掃除。強まりすぎた点数を下限まで戻す（点数は小さいほど優先） */
+    @Query("UPDATE learn_table SET score = :floor WHERE score < :floor")
+    suspend fun raiseScoresToFloor(floor: Int): Int
 
     /**
      * Common Prefix Search: Finds entries where the 'input' value is a prefix of the given searchTerm.
@@ -104,17 +114,30 @@ interface LearnDao {
      * learning session.
      */
     @Transaction
-    suspend fun upsertLearningEntries(learnDataList: List<LearnEntity>) {
+    suspend fun upsertLearningEntries(
+        learnDataList: List<LearnEntity>,
+        passive: Set<Pair<String, String>>,
+    ) {
         learnDataList.forEach { incoming ->
+            val isPassive = (incoming.input to incoming.out) in passive
             val existing = findByInputAndOutput(incoming.input, incoming.out)
+            // 選び直した語だけ、同じ読みの他の学習語より前に出す
+            val bestRivalScore = if (isPassive) null else findByInput(incoming.input)
+                ?.filter { it.out != incoming.out }
+                ?.minOfOrNull { it.score }
+            fun ranked(score: Int): Int =
+                if (isPassive) score else LearningScorePolicy.outrank(score, bestRivalScore)
             if (existing == null) {
-                insert(incoming)
+                insert(incoming.copy(score = ranked(incoming.score)))
             } else {
                 updateLearnedData(
                     existing.copy(
-                        score = LearningScorePolicy.reinforce(
-                            existingScore = existing.score,
-                            incomingScore = incoming.score,
+                        // 先頭候補をそのまま確定しただけなら、回数と時刻だけ更新して点数は強めない
+                        score = if (isPassive) existing.score else ranked(
+                            LearningScorePolicy.reinforce(
+                                existingScore = existing.score,
+                                incomingScore = incoming.score,
+                            )
                         ),
                         leftId = incoming.leftId ?: existing.leftId,
                         rightId = incoming.rightId ?: existing.rightId,
